@@ -1,0 +1,54 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "portwatch"
+version = "0.1.0"
+description = "Alternative-data pipeline and research dashboard for U.S. port and industrial trade flows."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "PortWatch Contributors" }]
+dependencies = [
+  "duckdb>=1.2,<2",
+  "httpx>=0.28,<1",
+  "pandas>=2.2,<3",
+  "plotly>=6,<7",
+  "pydantic>=2.10,<3",
+  "pydantic-settings>=2.7,<3",
+  "streamlit>=1.41,<2",
+  "tenacity>=9,<10",
+  "typer>=0.15,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "mypy>=1.14,<2",
+  "pytest>=8.3,<9",
+  "pytest-cov>=6,<7",
+  "ruff>=0.9,<1",
+]
+
+[project.scripts]
+portwatch = "portwatch.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/portwatch"]
+
+[tool.pytest.ini_options]
+addopts = "-q --strict-markers"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "RUF"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+packages = ["portwatch"]
+
