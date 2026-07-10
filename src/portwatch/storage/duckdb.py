@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -82,7 +82,7 @@ class DuckDBRepository:
         records_written: int,
         error_message: str | None = None,
     ) -> datetime:
-        completed_at = datetime.now(timezone.utc)
+        completed_at = datetime.now(UTC)
         with self._connect() as connection:
             connection.execute(
                 """
@@ -111,7 +111,7 @@ class DuckDBRepository:
                     (payload_sha256, run_id, source, retrieved_at, content)
                 VALUES (?, ?, ?, ?, ?)
                 """,
-                [payload_hash, run_id, source.value, datetime.now(timezone.utc), content],
+                [payload_hash, run_id, source.value, datetime.now(UTC), content],
             )
         return payload_hash
 
@@ -184,4 +184,3 @@ class DuckDBRepository:
 
     def _connect(self) -> duckdb.DuckDBPyConnection:
         return duckdb.connect(str(self.database_path))
-

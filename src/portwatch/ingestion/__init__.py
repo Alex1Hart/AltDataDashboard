@@ -1,2 +1,1 @@
 """Source-specific ingestion adapters."""
-

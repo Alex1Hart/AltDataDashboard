@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from enum import StrEnum
 
@@ -36,7 +36,7 @@ class TradeFlow(BaseModel):
     containerized_weight_kg: Decimal = Field(ge=0)
     source: SourceName = SourceName.CENSUS_PORT_HS
     source_updated_at: datetime | None = None
-    ingested_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    ingested_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     @field_validator("month")
     @classmethod
@@ -65,4 +65,3 @@ class IngestionResult(BaseModel):
     started_at: datetime
     completed_at: datetime
     error_message: str | None = None
-

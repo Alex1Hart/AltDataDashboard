@@ -28,28 +28,20 @@ def validate_trade_flows(
 
     for flow in flows:
         if expected_month is not None and flow.month != expected_month:
-            raise DataValidationError(
-                f"unexpected month {flow.month}; expected {expected_month}"
-            )
+            raise DataValidationError(f"unexpected month {flow.month}; expected {expected_month}")
         if expected_port_code is not None and flow.port_code != expected_port_code:
             raise DataValidationError(
                 f"unexpected port {flow.port_code}; expected {expected_port_code}"
             )
-        if expected_commodity_code is not None and (
-            flow.commodity_code != expected_commodity_code
-        ):
+        if expected_commodity_code is not None and (flow.commodity_code != expected_commodity_code):
             raise DataValidationError(
-                f"unexpected commodity {flow.commodity_code}; "
-                f"expected {expected_commodity_code}"
+                f"unexpected commodity {flow.commodity_code}; expected {expected_commodity_code}"
             )
         if flow.containerized_value_usd > flow.vessel_value_usd:
             raise DataValidationError(
-                "containerized vessel value exceeds total vessel value for "
-                f"{flow.natural_key}"
+                f"containerized vessel value exceeds total vessel value for {flow.natural_key}"
             )
         if flow.containerized_weight_kg > flow.vessel_weight_kg:
             raise DataValidationError(
-                "containerized vessel weight exceeds total vessel weight for "
-                f"{flow.natural_key}"
+                f"containerized vessel weight exceeds total vessel weight for {flow.natural_key}"
             )
-

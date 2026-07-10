@@ -1,0 +1,53 @@
+[
+  [
+    "PORT_NAME",
+    "I_COMMODITY",
+    "I_COMMODITY_LDESC",
+    "CTY_CODE",
+    "CTY_DESC",
+    "YEAR",
+    "MONTH",
+    "GEN_VAL_MO",
+    "VES_VAL_MO",
+    "VES_WGT_MO",
+    "CNT_VAL_MO",
+    "CNT_WGT_MO",
+    "LAST_UPDATE",
+    "customs district",
+    "port"
+  ],
+  [
+    "LOS ANGELES, CA",
+    "84",
+    "NUCLEAR REACTORS, BOILERS, MACHINERY AND MECHANICAL APPLIANCES",
+    "5700",
+    "CHINA",
+    "2026",
+    "05",
+    "1500000000",
+    "1400000000",
+    "225000000",
+    "1320000000",
+    "210000000",
+    "2026-06-15T12:00:00Z",
+    "27",
+    "272704"
+  ],
+  [
+    "LOS ANGELES, CA",
+    "84",
+    "NUCLEAR REACTORS, BOILERS, MACHINERY AND MECHANICAL APPLIANCES",
+    "5880",
+    "JAPAN",
+    "2026",
+    "05",
+    "420000000",
+    "400000000",
+    "71000000",
+    "350000000",
+    "65000000",
+    "2026-06-15T12:00:00Z",
+    "27",
+    "272704"
+  ]
+]

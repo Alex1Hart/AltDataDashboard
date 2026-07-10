@@ -7,7 +7,7 @@ name = "portwatch"
 version = "0.1.0"
 description = "Alternative-data pipeline and research dashboard for U.S. port and industrial trade flows."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 license = { text = "MIT" }
 authors = [{ name = "PortWatch Contributors" }]
 dependencies = [
@@ -48,7 +48,11 @@ target-version = "py311"
 select = ["E", "F", "I", "B", "UP", "RUF"]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 strict = true
 packages = ["portwatch"]
 
+[[tool.mypy.overrides]]
+module = ["numpy", "numpy.*", "pandas", "pandas.*", "plotly", "plotly.*"]
+ignore_missing_imports = true
+follow_imports = "skip"

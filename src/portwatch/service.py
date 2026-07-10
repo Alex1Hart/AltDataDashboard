@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from uuid import uuid4
 
 from portwatch.ingestion.census import CensusPortHSClient
@@ -28,7 +28,7 @@ class IngestionService:
         country_code: str | None = None,
     ) -> IngestionResult:
         run_id = str(uuid4())
-        started_at = datetime.now(timezone.utc)
+        started_at = datetime.now(UTC)
         source = SourceName.CENSUS_PORT_HS
         self.repository.initialize()
         self.repository.start_run(run_id, source, started_at)

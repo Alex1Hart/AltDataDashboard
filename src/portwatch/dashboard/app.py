@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pandas as pd
 import plotly.express as px
 import streamlit as st
 
@@ -10,7 +11,7 @@ st.set_page_config(page_title="PortWatch", page_icon="⚓", layout="wide")
 
 
 @st.cache_data(ttl=60)
-def load_data() -> tuple[object, object]:
+def load_data() -> tuple[pd.DataFrame, pd.DataFrame]:
     settings = get_settings()
     repository = DuckDBRepository(settings.database_path)
     repository.initialize()
@@ -37,7 +38,8 @@ with overview_tab:
         latest = flows[flows["month"] == latest_month]
         col1, col2, col3 = st.columns(3)
         col1.metric("Latest month", str(latest_month)[:10])
-        col2.metric("Containerized value", f"${latest['containerized_value_usd'].sum() / 1e9:,.2f}B")
+        containerized_value_billions = latest["containerized_value_usd"].sum() / 1e9
+        col2.metric("Containerized value", f"${containerized_value_billions:,.2f}B")
         col3.metric("Countries observed", f"{latest['country_name'].nunique():,}")
 
         by_commodity = (
