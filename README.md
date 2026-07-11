@@ -5,8 +5,9 @@ conditions and industrial trade flows. It combines validated public data with ex
 provenance so an analyst can separate observed cargo movements from inferred public-company
 exposure.
 
-> **Project status:** early MVP. The first vertical slice ingests monthly Census imports by
-> port, Harmonized System commodity, and origin country into an auditable DuckDB store.
+> **Project status:** v0.2 research pipeline. PortWatch ingests monthly Census imports and public
+> Port of Los Angeles container statistics into a vintage-aware DuckDB store, calculates
+> deterministic signals, and maps them to explicitly inferred company exposure.
 
 ## Why this exists
 
@@ -35,11 +36,11 @@ flowchart LR
 ```
 
 The ingestion path includes bounded retries for transient network errors, request timeouts,
-source-specific validation, idempotent upserts, raw response hashing, and success/failure run
-history.
+source-specific validation, resumable configuration-driven backfills, raw response hashing,
+revision history, and success/failure run audits.
 
-See [the architecture notes](docs/architecture.md) for component boundaries and planned
-extensions.
+See [the project structure](docs/project-structure.md), [data model](docs/data-model.md), and
+[architecture notes](docs/architecture.md) for component boundaries and research semantics.
 
 ## Data grain
 
@@ -86,6 +87,13 @@ Launch the dashboard:
 portwatch dashboard
 ```
 
+Run the full configured backfill and latest Port of Los Angeles release:
+
+```bash
+portwatch backfill --config config/portwatch.yml
+portwatch ingest port-la
+```
+
 Schedule D port codes used in the initial scope:
 
 | Port | Code |
@@ -110,10 +118,13 @@ require credentials.
 - [x] Typed Census port/HS ingestion adapter
 - [x] Semantic data contracts and ingestion audit table
 - [x] Idempotent DuckDB storage and dashboard shell
-- [ ] Backfill orchestration for the Industrials HS universe
-- [ ] Port of Los Angeles and Long Beach operating-report adapters
-- [ ] Commodity momentum and concentration signals
-- [ ] Evidence-backed public-company exposure registry
+- [x] Resumable backfill orchestration for the Industrials HS universe
+- [x] Publication-aware current values and complete revision history
+- [x] Port of Los Angeles monthly public container-statistics adapter
+- [x] Commodity momentum, concentration, z-score, and unit-value signals
+- [x] Evidence-backed public-company exposure registry structure
+- [ ] Daily dwell, vessel, rail, and blank-sailing adapters
+- [ ] Long Beach public operating-report adapter
 - [ ] Grounded research copilot with citations
 - [ ] Containerized deployment and scheduled ingestion
 

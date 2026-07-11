@@ -3,9 +3,10 @@
 ## Product boundary
 
 The MVP observes monthly industrial imports through Los Angeles and Long Beach. It does not
-attempt direct importer identification. The first extension will add public port-operating
-metrics; company exposures and LLM-generated briefs come only after the observed dataset is
-stable and backfilled.
+attempt direct importer identification. The v0.2 architecture adds resumable backfills, source
+revision history, public Port of Los Angeles monthly operating statistics, deterministic signals,
+and a reviewed company exposure registry. LLM-generated briefs remain downstream of these
+validated layers.
 
 ## Components
 
@@ -25,8 +26,9 @@ setup. The repository boundary allows PostgreSQL or object-storage adapters to b
 without changing source clients or domain models.
 
 Raw response bodies are stored as content-addressed blobs using SHA-256. Normalized observations
-are upserted on their natural key, making repeated runs idempotent. Every write references an
-ingestion run.
+have a latest-value table and a complete revision-history table. Identical re-ingestion is idempotent;
+changed values close the prior vintage and increment the revision number. Every write references
+an ingestion run and preserves when the value became available to the pipeline.
 
 ## Failure policy
 
@@ -50,4 +52,3 @@ The local MVP runs through Typer and Streamlit. A later production profile will 
 components in Docker, schedule ingestion through GitHub Actions or a managed job runner, store raw
 objects outside the analytical database, and expose dashboard-ready aggregates through a small
 API. Those components are intentionally deferred until the data contracts have proven stable.
-

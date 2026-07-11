@@ -11,12 +11,14 @@ requires-python = ">=3.12"
 license = { text = "MIT" }
 authors = [{ name = "PortWatch Contributors" }]
 dependencies = [
+  "beautifulsoup4>=4.13,<5",
   "duckdb>=1.2,<2",
   "httpx>=0.28,<1",
   "pandas>=2.2,<3",
   "plotly>=6,<7",
   "pydantic>=2.10,<3",
   "pydantic-settings>=2.7,<3",
+  "pyyaml>=6,<7",
   "streamlit>=1.41,<2",
   "tenacity>=9,<10",
   "typer>=0.15,<1",
@@ -28,6 +30,7 @@ dev = [
   "pytest>=8.3,<9",
   "pytest-cov>=6,<7",
   "ruff>=0.9,<1",
+  "types-PyYAML>=6.0,<7",
 ]
 
 [project.scripts]

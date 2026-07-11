@@ -21,6 +21,14 @@ class Settings(BaseSettings):
         default=Path("data/portwatch.duckdb"),
         alias="PORTWATCH_DATABASE_PATH",
     )
+    project_config_path: Path = Field(
+        default=Path("config/portwatch.yml"),
+        alias="PORTWATCH_PROJECT_CONFIG_PATH",
+    )
+    company_registry_path: Path = Field(
+        default=Path("config/company_exposures.yml"),
+        alias="PORTWATCH_COMPANY_REGISTRY_PATH",
+    )
     http_timeout_seconds: float = Field(
         default=30.0,
         gt=0,

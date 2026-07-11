@@ -1,65 +1,48 @@
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 from uuid import uuid4
 
-from portwatch.ingestion.census import CensusPortHSClient
+from portwatch.ingestion.port_of_la import PortOfLosAngelesClient
 from portwatch.models import IngestionResult, IngestionStatus, SourceName
 from portwatch.storage.duckdb import DuckDBRepository
-from portwatch.validation import validate_trade_flows
+from portwatch.validation import validate_port_operations
 
 
-class IngestionService:
+class PortOperationsIngestionService:
     def __init__(
         self,
         *,
-        census_client: CensusPortHSClient,
+        client: PortOfLosAngelesClient,
         repository: DuckDBRepository,
     ) -> None:
-        self.census_client = census_client
+        self.client = client
         self.repository = repository
 
-    def ingest_census_month(
-        self,
-        *,
-        month: date,
-        port_code: str,
-        commodity_code: str,
-        country_code: str | None = None,
-    ) -> IngestionResult:
+    def ingest_latest(self) -> IngestionResult:
         run_id = str(uuid4())
+        source = SourceName.PORT_OF_LA_CONTAINER_STATS
         started_at = datetime.now(UTC)
-        source = SourceName.CENSUS_PORT_HS
         self.repository.initialize()
-        self.repository.start_run(
-            run_id,
-            source,
-            started_at,
-            period_start=month,
-            port_code=port_code,
-            commodity_code=commodity_code,
-            country_code=country_code,
-        )
 
         received = 0
+        run_started = False
         try:
-            flows, raw_payload = self.census_client.fetch_month(
-                month=month,
-                port_code=port_code,
-                commodity_code=commodity_code,
-                country_code=country_code,
-            )
-            received = len(flows)
-            validate_trade_flows(
-                flows,
-                expected_month=month,
-                expected_port_code=port_code,
-                expected_commodity_code=commodity_code,
-            )
-            payload_sha256 = self.repository.store_raw_payload(run_id, source, raw_payload)
-            written = self.repository.upsert_trade_flows(
+            operations, raw_payload = self.client.fetch_latest()
+            received = len(operations)
+            validate_port_operations(operations)
+            self.repository.start_run(
                 run_id,
-                flows,
+                source,
+                started_at,
+                period_start=operations[0].period_start,
+                port_code=operations[0].port_code,
+            )
+            run_started = True
+            payload_sha256 = self.repository.store_raw_payload(run_id, source, raw_payload)
+            written = self.repository.upsert_port_operations(
+                run_id,
+                operations,
                 payload_sha256=payload_sha256,
             )
             completed_at = self.repository.finish_run(
@@ -78,6 +61,8 @@ class IngestionService:
                 completed_at=completed_at,
             )
         except Exception as exc:
+            if not run_started:
+                self.repository.start_run(run_id, source, started_at)
             completed_at = self.repository.finish_run(
                 run_id,
                 status=IngestionStatus.FAILED,
@@ -86,5 +71,5 @@ class IngestionService:
                 error_message=str(exc)[:2000],
             )
             raise RuntimeError(
-                f"Census ingestion run {run_id} failed at {completed_at.isoformat()}"
+                f"Port operations ingestion run {run_id} failed at {completed_at.isoformat()}"
             ) from exc

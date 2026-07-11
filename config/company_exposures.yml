@@ -1,0 +1,39 @@
+version: 1
+
+companies:
+  - ticker: CAT
+    company_name: Caterpillar Inc.
+    confidence: medium
+    analyst_reviewed_on: 2026-07-10
+    commodity_exposures:
+      - hs_code: "84"
+        weight: 1.0
+        direction: demand
+        rationale: >-
+          HS 84 is the closest broad trade category for Caterpillar's construction and
+          mining machinery, engines, turbines, and related mechanical equipment.
+        evidence_ids: [cat_2025_10k]
+      - hs_code: "86"
+        weight: 0.25
+        direction: demand
+        rationale: >-
+          Caterpillar identifies diesel-electric locomotives among its manufactured
+          products, creating a secondary railway-equipment exposure.
+        evidence_ids: [cat_2025_10k]
+    port_weights:
+      "2704": 0.5
+      "2709": 0.5
+    country_weights: {}
+    evidence:
+      cat_2025_10k:
+        evidence_type: sec_filing
+        title: Caterpillar 2025 Form 10-K
+        url: https://www.sec.gov/Archives/edgar/data/18230/000001823026000008/cat-20251231.htm
+        published_on: 2026-02-13
+        excerpt_summary: >-
+          Caterpillar describes itself as a manufacturer of construction and mining
+          equipment, engines, industrial gas turbines, and diesel-electric locomotives.
+    limitations: >-
+      This is an economic product-category mapping, not evidence that Caterpillar owned
+      or imported any shipment observed at Los Angeles or Long Beach.
+

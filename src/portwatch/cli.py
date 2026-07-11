@@ -4,11 +4,16 @@ import subprocess
 import sys
 from datetime import date, datetime
 from pathlib import Path
+from typing import Annotated
 
 import typer
 
+from portwatch.backfill import BackfillService
 from portwatch.config import get_settings
 from portwatch.ingestion.census import CensusPortHSClient
+from portwatch.ingestion.port_of_la import PortOfLosAngelesClient
+from portwatch.port_service import PortOperationsIngestionService
+from portwatch.project_config import load_project_config
 from portwatch.service import IngestionService
 from portwatch.storage.duckdb import DuckDBRepository
 
@@ -58,6 +63,54 @@ def ingest_census(
         country_code=country,
     )
     typer.echo(result.model_dump_json(indent=2))
+
+
+@ingest_app.command("port-la")
+def ingest_port_of_los_angeles() -> None:
+    """Ingest the latest public Port of Los Angeles monthly container statistics."""
+    settings = get_settings()
+    service = PortOperationsIngestionService(
+        client=PortOfLosAngelesClient(settings),
+        repository=DuckDBRepository(settings.database_path),
+    )
+    result = service.ingest_latest()
+    typer.echo(result.model_dump_json(indent=2))
+
+
+@app.command()
+def backfill(
+    config_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--config",
+            help="Project YAML configuration; defaults to PORTWATCH_PROJECT_CONFIG_PATH.",
+        ),
+    ] = None,
+    force: Annotated[
+        bool,
+        typer.Option(help="Re-request slices already marked successful."),
+    ] = False,
+) -> None:
+    """Run the resumable Census backfill defined by the project configuration."""
+    settings = get_settings()
+    if not settings.census_api_key:
+        typer.echo("CENSUS_API_KEY is required before running a backfill.", err=True)
+        raise typer.Exit(2)
+    repository = DuckDBRepository(settings.database_path)
+    ingestion_service = IngestionService(
+        census_client=CensusPortHSClient(settings),
+        repository=repository,
+    )
+    service = BackfillService(
+        ingestion_service=ingestion_service,
+        repository=repository,
+    )
+    project = load_project_config(config_path or settings.project_config_path)
+    summary = service.run(project, force=force)
+    typer.echo(
+        f"planned={summary.planned} succeeded={summary.succeeded} "
+        f"skipped={summary.skipped} failed={summary.failed}"
+    )
 
 
 @app.command()

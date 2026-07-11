@@ -39,6 +39,12 @@ def test_service_records_successful_end_to_end_run(tmp_path: Path) -> None:
     assert result.records_written == 2
     assert repository.execute_scalar("SELECT COUNT(*) FROM trade_flows") == 2
     assert repository.execute_scalar("SELECT status FROM ingestion_runs") == "succeeded"
+    assert repository.has_successful_trade_slice(
+        source=result.source,
+        month=date(2026, 5, 1),
+        port_code="2704",
+        commodity_code="84",
+    )
 
 
 def test_service_audits_failed_run(tmp_path: Path) -> None:

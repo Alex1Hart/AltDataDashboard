@@ -1,0 +1,36 @@
+version: 1
+
+backfill:
+  start_month: 2024-01-01
+  # Null resolves to the current month less publication_lag_months.
+  end_month: null
+  publication_lag_months: 2
+  request_delay_seconds: 0.5
+  continue_on_error: true
+
+ports:
+  - code: "2704"
+    name: Los Angeles, CA
+  - code: "2709"
+    name: Long Beach, CA
+
+commodities:
+  - code: "72"
+    theme: Iron and steel
+  - code: "73"
+    theme: Fabricated iron and steel articles
+  - code: "76"
+    theme: Aluminum and aluminum products
+  - code: "84"
+    theme: Industrial machinery and mechanical equipment
+  - code: "85"
+    theme: Electrical machinery and components
+  - code: "86"
+    theme: Railway equipment
+  - code: "87"
+    theme: Vehicles and components
+  - code: "88"
+    theme: Aircraft and aerospace components
+  - code: "89"
+    theme: Ships and marine equipment
+

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -158,4 +158,5 @@ def _parse_datetime(value: object) -> datetime | None:
     if not value:
         return None
     raw = str(value).replace("Z", "+00:00")
-    return datetime.fromisoformat(raw)
+    parsed = datetime.fromisoformat(raw)
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
