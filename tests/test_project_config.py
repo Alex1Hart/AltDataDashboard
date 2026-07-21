@@ -66,4 +66,5 @@ def test_backfill_skips_successful_slices_and_runs_remaining_work() -> None:
         month=date(2026, 5, 1),
         port_code="2704",
         commodity_code="72",
+        country_code=None,
     )

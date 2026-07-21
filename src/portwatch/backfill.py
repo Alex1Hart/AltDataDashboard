@@ -71,6 +71,7 @@ class BackfillService:
                 month=item.month,
                 port_code=item.port_code,
                 commodity_code=item.commodity_code,
+                country_code=None,
             ):
                 skipped += 1
                 continue

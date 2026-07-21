@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
@@ -246,7 +248,7 @@ class DuckDBRepository:
         payload_sha256: str,
     ) -> int:
         changed = 0
-        with self._connect() as connection:
+        with self._connect() as connection, self._transaction(connection):
             for flow in flows:
                 existing = connection.execute(
                     """
@@ -346,7 +348,7 @@ class DuckDBRepository:
         payload_sha256: str,
     ) -> int:
         changed = 0
-        with self._connect() as connection:
+        with self._connect() as connection, self._transaction(connection):
             for operation in operations:
                 existing = connection.execute(
                     """
@@ -435,13 +437,16 @@ class DuckDBRepository:
         month: date,
         port_code: str,
         commodity_code: str,
+        country_code: str | None = None,
     ) -> bool:
         with self._connect() as connection:
             row = connection.execute(
                 """
                 SELECT 1 FROM ingestion_runs
                 WHERE source = ? AND period_start = ? AND port_code = ?
-                  AND commodity_code = ? AND status = ?
+                  AND commodity_code = ?
+                  AND country_code IS NOT DISTINCT FROM ?
+                  AND status = ?
                 LIMIT 1
                 """,
                 [
@@ -449,10 +454,23 @@ class DuckDBRepository:
                     month,
                     port_code,
                     commodity_code,
+                    country_code,
                     IngestionStatus.SUCCEEDED.value,
                 ],
             ).fetchone()
         return row is not None
+
+    @staticmethod
+    @contextmanager
+    def _transaction(connection: duckdb.DuckDBPyConnection) -> Iterator[None]:
+        connection.execute("BEGIN TRANSACTION")
+        try:
+            yield
+        except Exception:
+            connection.execute("ROLLBACK")
+            raise
+        else:
+            connection.execute("COMMIT")
 
     def trade_flow_summary(self) -> pd.DataFrame:
         with self._connect() as connection:

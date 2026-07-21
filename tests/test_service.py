@@ -44,6 +44,7 @@ def test_service_records_successful_end_to_end_run(tmp_path: Path) -> None:
         month=date(2026, 5, 1),
         port_code="2704",
         commodity_code="84",
+        country_code=None,
     )
 
 
