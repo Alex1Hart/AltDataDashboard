@@ -1,5 +1,39 @@
 # Data model and research semantics
 
+## Company insight grain
+
+The target research product is a versioned company insight:
+
+```text
+ticker x as_of_date x signal_name x evidence_vintage
+```
+
+Each insight must link to reviewed company entities and source observations, preserve point-in-time
+availability, state whether evidence is observed, company-linked, or inferred, and include
+confidence and counterevidence. Aggregate port/trade data cannot satisfy the company-evidence
+requirement by itself. See [the company insight strategy](company-insight-strategy.md) for the
+output contract.
+
+## Company entity graph
+
+Registry version 2 contains three dated node types:
+
+```text
+issuer -> subsidiary
+issuer or subsidiary -> facility
+```
+
+Each entity has a stable internal `entity_id`, name and aliases, geography, a validity interval,
+evidence references, and optional dated external identifiers such as ticker, SEC CIK, LEI, UEI,
+EPA FRS, or OSHA establishment ID. Each directed relationship records its type (`owns` or
+`operates`), confidence, supported validity interval, and evidence.
+
+The registry rejects duplicate entity and relationship IDs, duplicate external identifiers,
+unknown evidence or endpoints, invalid facility relationships, cycles, and nodes that cannot be
+reached from a covered issuer. `valid_from` means the earliest date supported by the cited
+evidence; it must not be interpreted as an incorporation, acquisition, or facility-opening date
+unless the source explicitly establishes that event.
+
 ## Trade flows
 
 Current table: `trade_flows`
@@ -41,9 +75,10 @@ discover a changed upstream value; unchanged values are idempotent and do not cr
 
 ## Ingestion audit grain
 
-`ingestion_runs` records source, slice dimensions, status, timestamps, record counts, and errors.
-This supports resumability: a slice is skipped only when the same source/month/port/commodity has
-a successful run, unless `--force` is supplied.
+`ingestion_runs` records source, slice or entity dimensions, status, timestamps, record counts, and
+errors. Trade runs use month/port/commodity/country; company evidence runs use `entity_id` and
+`ticker`. This supports resumability: a trade slice is skipped only when the same complete set of
+dimensions has a successful run, unless `--force` is supplied.
 
 ## Deterministic trade signals
 
@@ -80,3 +115,29 @@ The dashboard's `weighted_zscore` is a weighted average of matched latest commod
 including optional port weights. It is an economic-exposure indicator. It is not evidence that a
 company owned, shipped, or received any underlying cargo.
 
+## SEC filing events
+
+`sec_filings` stores recent submission metadata at:
+
+```text
+accession_number
+```
+
+Each filing is linked to the reviewed registry `entity_id` resolved from the response CIK. The
+table preserves filing and report dates, the SEC acceptance timestamp, form, primary-document URL,
+XBRL flags, raw payload hash, ingestion run, and pipeline availability time. Accession numbers are
+globally unique and filing events are inserted idempotently.
+
+## SEC Company Facts
+
+`sec_company_facts` stores the latest numeric XBRL observation for each deterministic context key.
+`fact_id` hashes the entity, concept, unit, reporting period, accession, fiscal context, form, and
+frame. A different accession creates a distinct observation; a source correction to the same
+context increments `revision_number` and closes the prior value in
+`sec_company_fact_revisions`. The current and revision writes share one database transaction.
+
+Facts from accessions present in the recent submissions response use the exact SEC acceptance
+timestamp. Older facts use the filing date at midnight UTC and set `acceptance_is_estimated=true`.
+Point-in-time research must use `accepted_at`/`publication_at` and retain that estimation flag.
+The original decimal value is stored as text to avoid precision loss; dashboard queries may derive
+a floating-point value for display.

@@ -38,6 +38,11 @@ class Settings(BaseSettings):
         default="PortWatch/0.1 (research)",
         alias="PORTWATCH_USER_AGENT",
     )
+    sec_request_interval_seconds: float = Field(
+        default=0.12,
+        ge=0.1,
+        alias="PORTWATCH_SEC_REQUEST_INTERVAL_SECONDS",
+    )
     log_level: str = Field(default="INFO", alias="PORTWATCH_LOG_LEVEL")
 
 

@@ -1,45 +1,51 @@
 # PortWatch
 
-PortWatch is an alternative-data pipeline and research dashboard for monitoring U.S. port
-conditions and industrial trade flows. It combines validated public data with explicit
-provenance so an analyst can separate observed cargo movements from inferred public-company
-exposure.
+PortWatch is a company-centered alternative-data research system for Industrials equities.
+It combines company-specific public records with port, trade, and operating data to produce
+dated, evidence-backed company insight cards. Explicit provenance separates observed company
+events from contextual cargo movements and inferred public-company exposure.
 
-> **Project status:** v0.2 research pipeline. PortWatch ingests monthly Census imports and public
-> Port of Los Angeles container statistics into a vintage-aware DuckDB store, calculates
-> deterministic signals, and maps them to explicitly inferred company exposure.
+> **Primary objective:** discover differentiated, micro/company-level changes that can update an
+> investment thesis. Port and trade aggregates are supporting evidence, not the final product.
+
+> **Project status:** v0.3 company-evidence foundation. The vintage-aware port/trade pipeline,
+> dated entity graph, SEC submissions and Company Facts ingestion, and inferred exposure layer are
+> implemented. Evidence-gated company insight cards are the next product milestone.
 
 ## Why this exists
 
 Traditional macro releases describe trade at a high level. PortWatch is designed to answer
-more specific research questions:
+company-relevant research questions:
 
-- What industrial goods are moving through a port?
-- Which origin countries drive the change?
-- Is containerized value or weight accelerating or declining?
-- Are port operating conditions consistent with the trade signal?
-- Which covered companies may be exposed, and what evidence supports that inference?
+- What changed for a covered company before it appeared clearly in reported financials?
+- Is the change directly observed in a company-linked source or inferred from its exposures?
+- Which products, facilities, customers, contracts, or origin countries explain the change?
+- Do port and operating conditions corroborate or contradict the company signal?
+- What is the confidence, freshness, counterevidence, and investment-thesis implication?
 
 PortWatch never presents an inferred company exposure as observed shipment ownership.
+No company score should be considered research-ready unless it includes at least one
+company-specific evidence source in addition to contextual port/trade data.
 
-## Current architecture
+## Target research architecture
 
 ```mermaid
 flowchart LR
-    A["Census International Trade API"] --> B["Source adapter"]
-    B --> C["Pydantic normalization"]
-    C --> D["Semantic validation"]
-    D --> E["Raw payload archive"]
-    D --> F["DuckDB analytical tables"]
-    F --> G["Streamlit dashboard"]
-    F --> H["Research and LLM layer — planned"]
+    A["Company-specific public records"] --> D["Validated evidence store"]
+    B["Port, trade, and operating data"] --> D
+    C["Reviewed company/entity registry"] --> D
+    D --> E["Deterministic company signals"]
+    E --> F["Company insight cards"]
+    F --> G["Dashboard"]
+    F --> H["Grounded research copilot - planned"]
 ```
 
 The ingestion path includes bounded retries for transient network errors, request timeouts,
 source-specific validation, resumable configuration-driven backfills, raw response hashing,
 revision history, and success/failure run audits.
 
-See [the project structure](docs/project-structure.md), [data model](docs/data-model.md), and
+See [the company insight strategy](docs/company-insight-strategy.md),
+[project structure](docs/project-structure.md), [data model](docs/data-model.md), and
 [architecture notes](docs/architecture.md) for component boundaries and research semantics.
 
 ## Data grain
@@ -94,6 +100,13 @@ portwatch backfill --config config/portwatch.yml
 portwatch ingest port-la
 ```
 
+Ingest SEC submissions and structured Company Facts for a reviewed registry issuer:
+
+```bash
+# PORTWATCH_USER_AGENT must include a real contact email for SEC fair-access compliance.
+portwatch ingest sec --ticker CAT
+```
+
 Schedule D port codes used in the initial scope:
 
 | Port | Code |
@@ -123,9 +136,15 @@ require credentials.
 - [x] Port of Los Angeles monthly public container-statistics adapter
 - [x] Commodity momentum, concentration, z-score, and unit-value signals
 - [x] Evidence-backed public-company exposure registry structure
+- [x] Dated company/subsidiary/facility entity graph with reviewed identifiers
+- [ ] Source-specific automated entity matching with analyst approval
+- [x] Company-specific SEC filing and structured-fact adapter
+- [ ] Company-level federal award adapter for relevant Industrials issuers
+- [ ] Facility event adapters for OSHA and EPA public records
+- [ ] Evidence-gated company insight cards with confidence and counterevidence
 - [ ] Daily dwell, vessel, rail, and blank-sailing adapters
 - [ ] Long Beach public operating-report adapter
-- [ ] Grounded research copilot with citations
+- [ ] Grounded company research copilot with source citations
 - [ ] Containerized deployment and scheduled ingestion
 
 ## Data and research limitations

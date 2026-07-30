@@ -12,14 +12,17 @@ from portwatch.backfill import BackfillService
 from portwatch.config import get_settings
 from portwatch.ingestion.census import CensusPortHSClient
 from portwatch.ingestion.port_of_la import PortOfLosAngelesClient
+from portwatch.ingestion.sec import SecEdgarClient
 from portwatch.port_service import PortOperationsIngestionService
 from portwatch.project_config import load_project_config
+from portwatch.registry import load_company_registry
+from portwatch.sec_service import SecEdgarIngestionService
 from portwatch.service import IngestionService
 from portwatch.storage.duckdb import DuckDBRepository
 
 app = typer.Typer(
     name="portwatch",
-    help="Ingest and explore U.S. port and industrial trade-flow data.",
+    help="Ingest and explore company evidence with contextual port and trade data.",
     no_args_is_help=True,
 )
 ingest_app = typer.Typer(help="Run a source-specific ingestion job.")
@@ -74,6 +77,21 @@ def ingest_port_of_los_angeles() -> None:
         repository=DuckDBRepository(settings.database_path),
     )
     result = service.ingest_latest()
+    typer.echo(result.model_dump_json(indent=2))
+
+
+@ingest_app.command("sec")
+def ingest_sec_edgar(
+    ticker: str = typer.Option(..., help="Registered public-company ticker, e.g. CAT."),
+) -> None:
+    """Ingest SEC submissions and Company Facts for a reviewed registry issuer."""
+    settings = get_settings()
+    registry = load_company_registry(settings.company_registry_path)
+    service = SecEdgarIngestionService(
+        client=SecEdgarClient(settings, registry),
+        repository=DuckDBRepository(settings.database_path),
+    )
+    result = service.ingest_company(ticker)
     typer.echo(result.model_dump_json(indent=2))
 
 

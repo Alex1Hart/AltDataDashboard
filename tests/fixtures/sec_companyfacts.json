@@ -1,0 +1,56 @@
+{
+  "cik": 18230,
+  "entityName": "CATERPILLAR INC",
+  "facts": {
+    "us-gaap": {
+      "RevenueFromContractWithCustomerExcludingAssessedTax": {
+        "label": "Revenue",
+        "description": "Revenue from contracts with customers excluding assessed tax.",
+        "units": {
+          "USD": [
+            {
+              "start": "2025-01-01",
+              "end": "2025-12-31",
+              "val": 67589000000,
+              "accn": "0000018230-26-000008",
+              "fy": 2025,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2026-02-13",
+              "frame": "CY2025"
+            },
+            {
+              "start": "2024-01-01",
+              "end": "2024-12-31",
+              "val": 64809000000,
+              "accn": "0000018230-25-000009",
+              "fy": 2024,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2025-02-14",
+              "frame": "CY2024"
+            }
+          ]
+        }
+      },
+      "Assets": {
+        "label": "Assets",
+        "description": "Total assets recognized as of the balance sheet date.",
+        "units": {
+          "USD": [
+            {
+              "end": "2025-12-31",
+              "val": 91742000000,
+              "accn": "0000018230-26-000008",
+              "fy": 2025,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2026-02-13",
+              "frame": "CY2025Q4I"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

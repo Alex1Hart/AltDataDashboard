@@ -2,11 +2,16 @@
 
 ## Product boundary
 
-The MVP observes monthly industrial imports through Los Angeles and Long Beach. It does not
-attempt direct importer identification. The v0.2 architecture adds resumable backfills, source
-revision history, public Port of Los Angeles monthly operating statistics, deterministic signals,
-and a reviewed company exposure registry. LLM-generated briefs remain downstream of these
-validated layers.
+PortWatch is a company-centered evidence system. Its primary analytical unit is a covered company;
+ports, commodities, countries, and operating metrics provide contextual evidence. The system does
+not infer importer ownership from aggregate cargo. A company conclusion requires a reviewed entity
+relationship and at least one company-specific or company-linked observation.
+
+The v0.3 foundation implements resumable port/trade ingestion, source revision history,
+deterministic contextual signals, a reviewed entity graph, and registry-resolved SEC submissions
+and Company Facts ingestion. The next milestone adds deterministic company signals and
+evidence-gated company insight cards. LLM-generated briefs remain downstream of these validated
+layers.
 
 ## Components
 
@@ -17,6 +22,9 @@ validated layers.
 | Validator | Enforce batch-level semantic contracts | Silently repair invalid source data |
 | Repository | Persist raw payloads, observations, and run metadata | Contain source-specific parsing |
 | Service | Orchestrate source → validate → archive → upsert | Embed dashboard logic |
+| Entity registry | Resolve issuers, subsidiaries, facilities, and source identifiers | Treat fuzzy matches as confirmed entities |
+| Evidence engine | Join dated company evidence with contextual signals | Promote inferred evidence to observed evidence |
+| Insight card | Present a falsifiable company claim, evidence, counterevidence, and confidence | Hide missing or stale inputs |
 | Dashboard | Query and display validated observations | Call upstream sources directly |
 
 ## Storage choice
@@ -25,14 +33,17 @@ DuckDB is the MVP store because it is reproducible, analytical, local, and requi
 setup. The repository boundary allows PostgreSQL or object-storage adapters to be added later
 without changing source clients or domain models.
 
-Raw response bodies are stored as content-addressed blobs using SHA-256. Normalized observations
-have a latest-value table and a complete revision-history table. Identical re-ingestion is idempotent;
-changed values close the prior vintage and increment the revision number. Every write references
-an ingestion run and preserves when the value became available to the pipeline.
+Raw response bodies are stored as content-addressed blobs using SHA-256. `raw_payload_links`
+records every run-to-payload relationship, resource type, retrieval time, and source URL even when
+multiple runs receive identical content. Normalized trade and port observations have a latest-value
+table and a complete revision-history table. SEC accessions are inserted idempotently; Company
+Facts source corrections create atomic revisions. Every write references an ingestion run and
+preserves when the value became available to the pipeline.
 
 ## Failure policy
 
 - Missing credentials fail before a network request.
+- SEC requests require a declared contact email and are limited below ten requests per second.
 - Timeouts and network errors receive bounded exponential-backoff retries.
 - HTTP errors are not blindly retried; the run is recorded as failed.
 - Schema drift and semantic violations fail the batch.

@@ -11,7 +11,10 @@ from portwatch.config import get_settings
 from portwatch.registry import (
     company_exposure_scores,
     load_company_registry,
+    registry_entities_frame,
     registry_exposures_frame,
+    registry_identifiers_frame,
+    registry_relationships_frame,
 )
 from portwatch.storage.duckdb import DuckDBRepository
 
@@ -34,6 +37,11 @@ def load_data() -> tuple[
     pd.DataFrame,
     pd.DataFrame,
     pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
 ]:
     settings = get_settings()
     repository = DuckDBRepository(settings.database_path)
@@ -47,19 +55,36 @@ def load_data() -> tuple[
         repository.port_operations_summary(),
         company_exposure_scores(signals, registry),
         registry_exposures_frame(registry),
+        registry_entities_frame(registry),
+        registry_identifiers_frame(registry),
+        registry_relationships_frame(registry),
+        repository.sec_filings_summary(),
+        repository.sec_company_facts_summary(),
         repository.trade_flow_revisions(),
     )
 
 
-flows, signals, operations, exposure_scores, exposure_registry, revisions = load_data()
+(
+    flows,
+    signals,
+    operations,
+    exposure_scores,
+    exposure_registry,
+    entity_registry,
+    entity_identifiers,
+    entity_relationships,
+    sec_filings,
+    sec_company_facts,
+    revisions,
+) = load_data()
 settings = get_settings()
 repository = DuckDBRepository(settings.database_path)
 runs = repository.recent_runs()
 
 st.title("PortWatch")
 st.caption(
-    "Observed U.S. port and industrial trade flows with vintage-aware provenance "
-    "and explicitly inferred company exposure"
+    "Company-centered Industrials evidence with dated entity relationships, "
+    "vintage-aware provenance, and contextual port and trade signals"
 )
 
 overview_tab, signals_tab, operations_tab, company_tab, revisions_tab, health_tab = st.tabs(
@@ -67,7 +92,7 @@ overview_tab, signals_tab, operations_tab, company_tab, revisions_tab, health_ta
         "Market overview",
         "Research signals",
         "Port operations",
-        "Company exposure",
+        "Company evidence",
         "Revisions",
         "Pipeline health",
     ]
@@ -168,6 +193,29 @@ with company_tab:
         st.dataframe(exposure_scores, width="stretch", hide_index=True)
     st.subheader("Reviewed exposure registry")
     st.dataframe(exposure_registry, width="stretch", hide_index=True)
+    st.subheader("Dated company entity graph")
+    st.caption(
+        "Reviewed issuer, subsidiary, and facility identities. Validity dates represent the "
+        "period supported by cited evidence, not an assumed legal inception date."
+    )
+    st.dataframe(entity_registry, width="stretch", hide_index=True)
+    st.subheader("External identifiers")
+    st.dataframe(entity_identifiers, width="stretch", hide_index=True)
+    st.subheader("Entity relationships")
+    st.dataframe(entity_relationships, width="stretch", hide_index=True)
+    st.subheader("SEC filing events")
+    if sec_filings.empty:
+        st.info("Run `portwatch ingest sec --ticker CAT` to load reviewed SEC evidence.")
+    else:
+        st.dataframe(sec_filings, width="stretch", hide_index=True)
+    st.subheader("SEC structured company facts")
+    if sec_company_facts.empty:
+        st.info("No SEC Company Facts have been ingested.")
+    else:
+        fact_tags = sorted(sec_company_facts["tag"].unique().tolist())
+        selected_fact_tag = st.selectbox("Company fact", fact_tags)
+        selected_facts = sec_company_facts[sec_company_facts["tag"] == selected_fact_tag]
+        st.dataframe(selected_facts, width="stretch", hide_index=True)
 
 with revisions_tab:
     st.caption(

@@ -1,0 +1,28 @@
+{
+  "cik": "18230",
+  "entityType": "operating",
+  "sic": "3531",
+  "sicDescription": "Construction Machinery and Equipment",
+  "name": "CATERPILLAR INC",
+  "tickers": ["CAT"],
+  "exchanges": ["NYSE"],
+  "filings": {
+    "recent": {
+      "accessionNumber": [
+        "0000018230-26-000008",
+        "0000018230-26-000010"
+      ],
+      "filingDate": ["2026-02-13", "2026-02-18"],
+      "reportDate": ["2025-12-31", "2026-02-18"],
+      "acceptanceDateTime": [
+        "2026-02-13T15:18:27.000Z",
+        "2026-02-18T14:05:00.000Z"
+      ],
+      "form": ["10-K", "8-K"],
+      "primaryDocument": ["cat-20251231.htm", "cat-20260218.htm"],
+      "isXBRL": [1, 1],
+      "isInlineXBRL": [1, 1]
+    },
+    "files": []
+  }
+}

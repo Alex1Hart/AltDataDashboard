@@ -7,9 +7,10 @@ and deterministic research analytics. The dashboard does not call upstream sourc
 FinanceTools/
 ├── config/
 │   ├── portwatch.yml                 # Backfill universe and execution policy
-│   └── company_exposures.yml         # Reviewed company/HS mappings and evidence
+│   └── company_exposures.yml         # Dated entity graph, exposures, and evidence
 ├── docs/
 │   ├── architecture.md               # Component boundaries and design decisions
+│   ├── company-insight-strategy.md   # Company evidence contract and source priorities
 │   ├── data-model.md                 # Grains, vintages, and signal definitions
 │   └── project-structure.md           # This file
 ├── src/portwatch/
@@ -19,7 +20,8 @@ FinanceTools/
 │   │   └── app.py                    # Read-only Streamlit research interface
 │   ├── ingestion/
 │   │   ├── census.py                 # Census port/HS API adapter
-│   │   └── port_of_la.py             # Port of LA public HTML adapter
+│   │   ├── port_of_la.py             # Port of LA public HTML adapter
+│   │   └── sec.py                    # SEC submissions and Company Facts adapter
 │   ├── storage/
 │   │   └── duckdb.py                 # Current tables, vintages, audit history
 │   ├── backfill.py                   # Resumable Cartesian backfill orchestration
@@ -29,6 +31,7 @@ FinanceTools/
 │   ├── port_service.py               # Port-operation ingestion transaction
 │   ├── project_config.py             # Versioned YAML project configuration
 │   ├── registry.py                   # Exposure loading and scoring
+│   ├── sec_service.py                # Atomic SEC evidence orchestration
 │   ├── service.py                    # Census ingestion transaction
 │   └── validation.py                 # Cross-record semantic contracts
 └── tests/
@@ -75,6 +78,9 @@ portwatch backfill --config config/portwatch.yml --force
 # Ingest the latest Port of Los Angeles monthly TEU release
 portwatch ingest port-la
 
+# Ingest company-specific SEC evidence through the reviewed CIK mapping
+portwatch ingest sec --ticker CAT
+
 # Launch research dashboard
 portwatch dashboard
 ```
@@ -83,7 +89,7 @@ portwatch dashboard
 
 - Add a source in `ingestion/`, a normalized model in `models.py`, and a transactional service.
 - Add new ports and HS themes in `config/portwatch.yml`; orchestration code does not change.
-- Add a reviewed company in `config/company_exposures.yml` with evidence and limitations.
+- Add a reviewed company and its dated entities in `config/company_exposures.yml` with evidence
+  and limitations.
 - Add daily dwell, vessel, rail, or blank-sailing metrics as new `PortMetricName` values without
   mixing them into the monthly Census trade-flow grain.
-

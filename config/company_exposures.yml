@@ -1,8 +1,74 @@
-version: 1
+version: 2
+
+entities:
+  - entity_id: cat_inc
+    entity_type: issuer
+    name: Caterpillar Inc.
+    aliases: [Caterpillar, CAT]
+    country_code: US
+    valid_from: 1986-01-01
+    valid_to: null
+    evidence_ids: [cat_2025_10k]
+    identifiers:
+      - scheme: ticker
+        value: CAT
+        valid_from: 2025-12-31
+        valid_to: null
+        evidence_ids: [cat_2025_10k]
+      - scheme: sec_cik
+        value: "0000018230"
+        valid_from: 2025-12-31
+        valid_to: null
+        evidence_ids: [cat_2025_10k]
+
+  - entity_id: cat_financial
+    entity_type: subsidiary
+    name: Caterpillar Financial Services Corporation
+    aliases: [Cat Financial]
+    country_code: US
+    region: DE
+    valid_from: 2025-12-31
+    valid_to: null
+    evidence_ids: [cat_2025_subsidiaries]
+    identifiers: []
+
+  - entity_id: cat_east_peoria_operations
+    entity_type: facility
+    name: Caterpillar East Peoria operations
+    aliases: [East Peoria manufacturing locations]
+    country_code: US
+    region: IL
+    locality: East Peoria
+    valid_from: 2025-12-31
+    valid_to: null
+    evidence_ids: [cat_2025_properties]
+    identifiers: []
+
+relationships:
+  - relationship_id: cat_owns_cat_financial
+    parent_entity_id: cat_inc
+    child_entity_id: cat_financial
+    relationship_type: owns
+    ownership_percent: 100
+    confidence: high
+    valid_from: 2025-12-31
+    valid_to: null
+    evidence_ids: [cat_2025_subsidiaries]
+
+  - relationship_id: cat_operates_east_peoria
+    parent_entity_id: cat_inc
+    child_entity_id: cat_east_peoria_operations
+    relationship_type: operates
+    ownership_percent: null
+    confidence: high
+    valid_from: 2025-12-31
+    valid_to: null
+    evidence_ids: [cat_2025_properties]
 
 companies:
   - ticker: CAT
     company_name: Caterpillar Inc.
+    root_entity_id: cat_inc
     confidence: medium
     analyst_reviewed_on: 2026-07-10
     commodity_exposures:
@@ -33,7 +99,22 @@ companies:
         excerpt_summary: >-
           Caterpillar describes itself as a manufacturer of construction and mining
           equipment, engines, industrial gas turbines, and diesel-electric locomotives.
+      cat_2025_subsidiaries:
+        evidence_type: sec_filing
+        title: Caterpillar 2025 Form 10-K Exhibit 21
+        url: https://www.sec.gov/Archives/edgar/data/18230/000001823026000008/cat_exx21x12312025subsidia.htm
+        published_on: 2026-02-13
+        excerpt_summary: >-
+          Exhibit 21 lists Caterpillar Financial Services Corporation as a direct or
+          indirect wholly owned Caterpillar subsidiary organized in Delaware.
+      cat_2025_properties:
+        evidence_type: sec_filing
+        title: Caterpillar 2025 Form 10-K, Item 2 Properties
+        url: https://www.sec.gov/Archives/edgar/data/18230/000001823026000008/cat-20251231.htm
+        published_on: 2026-02-13
+        excerpt_summary: >-
+          Item 2 lists East Peoria, Illinois among Caterpillar's principal manufacturing
+          locations. The graph node represents the reported location, not an individual building.
     limitations: >-
       This is an economic product-category mapping, not evidence that Caterpillar owned
       or imported any shipment observed at Los Angeles or Long Beach.
-
