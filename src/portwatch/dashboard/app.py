@@ -20,6 +20,20 @@ from portwatch.storage.duckdb import DuckDBRepository
 
 st.set_page_config(page_title="PortWatch", page_icon="⚓", layout="wide")
 
+FACT_PRIORITY = {
+    "Revenues": 0,
+    "OperatingIncomeLoss": 1,
+    "InventoryNet": 2,
+    "RevenueRemainingPerformanceObligation": 3,
+    "CostOfRevenue": 4,
+    "NetIncomeLoss": 5,
+    "NetCashProvidedByUsedInOperatingActivities": 6,
+    "PaymentsToAcquirePropertyPlantAndEquipment": 7,
+    "CashAndCashEquivalentsAtCarryingValue": 8,
+    "Assets": 9,
+    "LongTermDebtCurrent": 10,
+}
+
 
 def _format_percent(value: Any) -> str:
     return "—" if pd.isna(value) else f"{float(value):.1%}"
@@ -27,6 +41,24 @@ def _format_percent(value: Any) -> str:
 
 def _format_number(value: Any) -> str:
     return "—" if pd.isna(value) else f"{float(value):.2f}"
+
+
+def _format_fact_value(value: Any, unit: str) -> str:
+    if pd.isna(value):
+        return "—"
+    numeric = float(value)
+    if unit == "USD":
+        magnitude = abs(numeric)
+        if magnitude >= 1e9:
+            return f"${numeric / 1e9:,.2f}B"
+        if magnitude >= 1e6:
+            return f"${numeric / 1e6:,.1f}M"
+        return f"${numeric:,.0f}"
+    if abs(numeric) >= 1e9:
+        return f"{numeric / 1e9:,.2f}B {unit}"
+    if abs(numeric) >= 1e6:
+        return f"{numeric / 1e6:,.1f}M {unit}"
+    return f"{numeric:,.2f} {unit}"
 
 
 @st.cache_data(ttl=60)
@@ -58,9 +90,31 @@ def load_data() -> tuple[
         registry_entities_frame(registry),
         registry_identifiers_frame(registry),
         registry_relationships_frame(registry),
-        repository.sec_filings_summary(),
-        repository.sec_company_facts_summary(),
+        repository.sec_filings_summary(forms=("10-K", "10-Q", "8-K")),
+        repository.sec_company_fact_catalog(),
         repository.trade_flow_revisions(),
+    )
+
+
+@st.cache_data(ttl=60)
+def load_source_counts() -> dict[str, int]:
+    settings = get_settings()
+    return DuckDBRepository(settings.database_path).source_counts()
+
+
+@st.cache_data(ttl=60)
+def load_fact_history(
+    entity_id: str,
+    taxonomy: str,
+    tag: str,
+    unit: str,
+) -> pd.DataFrame:
+    settings = get_settings()
+    return DuckDBRepository(settings.database_path).sec_company_fact_history(
+        entity_id=entity_id,
+        taxonomy=taxonomy,
+        tag=tag,
+        unit=unit,
     )
 
 
@@ -74,12 +128,13 @@ def load_data() -> tuple[
     entity_identifiers,
     entity_relationships,
     sec_filings,
-    sec_company_facts,
+    sec_fact_catalog,
     revisions,
 ) = load_data()
 settings = get_settings()
 repository = DuckDBRepository(settings.database_path)
 runs = repository.recent_runs()
+source_counts = load_source_counts()
 
 st.title("PortWatch")
 st.caption(
@@ -87,12 +142,22 @@ st.caption(
     "vintage-aware provenance, and contextual port and trade signals"
 )
 
-overview_tab, signals_tab, operations_tab, company_tab, revisions_tab, health_tab = st.tabs(
+coverage_columns = st.columns(5)
+coverage_columns[0].metric(
+    "Tracked companies",
+    f"{exposure_registry['ticker'].nunique():,}",
+)
+coverage_columns[1].metric("SEC filings", f"{source_counts['sec_filings']:,}")
+coverage_columns[2].metric("SEC facts", f"{source_counts['sec_company_facts']:,}")
+coverage_columns[3].metric("Trade rows", f"{source_counts['trade_flows']:,}")
+coverage_columns[4].metric("Port observations", f"{source_counts['port_operations']:,}")
+
+company_tab, overview_tab, signals_tab, operations_tab, revisions_tab, health_tab = st.tabs(
     [
+        "Company research",
         "Market overview",
         "Research signals",
         "Port operations",
-        "Company evidence",
         "Revisions",
         "Pipeline health",
     ]
@@ -100,7 +165,13 @@ overview_tab, signals_tab, operations_tab, company_tab, revisions_tab, health_ta
 
 with overview_tab:
     if flows.empty:
-        st.info("No Census observations have been ingested. Run the configured backfill first.")
+        st.info(
+            "SEC company evidence is loaded, but the market overview requires Census "
+            "trade-flow history. Add a Census API key to `.env`, then run:"
+        )
+        st.code("portwatch backfill --config config/portwatch.yml", language="powershell")
+        if not settings.census_api_key:
+            st.warning("`CENSUS_API_KEY` is currently blank.")
     else:
         latest_month = flows["month"].max()
         latest = flows[flows["month"] == latest_month]
@@ -182,40 +253,186 @@ with operations_tab:
         st.dataframe(operations, width="stretch", hide_index=True)
 
 with company_tab:
+    st.subheader("Company research cockpit")
     st.warning(
-        "Company scores are inferred economic exposure, not observed importer or "
-        "shipment ownership."
+        "SEC metrics are company-reported. Port and trade exposure scores are inferred "
+        "economic linkages, not observed shipment ownership."
     )
-    st.subheader("Latest exposure signals")
-    if exposure_scores.empty:
-        st.info("Exposure scores require sufficient trade history for rolling z-scores.")
-    else:
-        st.dataframe(exposure_scores, width="stretch", hide_index=True)
-    st.subheader("Reviewed exposure registry")
-    st.dataframe(exposure_registry, width="stretch", hide_index=True)
-    st.subheader("Dated company entity graph")
-    st.caption(
-        "Reviewed issuer, subsidiary, and facility identities. Validity dates represent the "
-        "period supported by cited evidence, not an assumed legal inception date."
-    )
-    st.dataframe(entity_registry, width="stretch", hide_index=True)
-    st.subheader("External identifiers")
-    st.dataframe(entity_identifiers, width="stretch", hide_index=True)
-    st.subheader("Entity relationships")
-    st.dataframe(entity_relationships, width="stretch", hide_index=True)
-    st.subheader("SEC filing events")
-    if sec_filings.empty:
+
+    st.markdown("#### Structured SEC fundamentals")
+    if sec_fact_catalog.empty:
         st.info("Run `portwatch ingest sec --ticker CAT` to load reviewed SEC evidence.")
     else:
-        st.dataframe(sec_filings, width="stretch", hide_index=True)
-    st.subheader("SEC structured company facts")
-    if sec_company_facts.empty:
-        st.info("No SEC Company Facts have been ingested.")
+        entity_names = dict(
+            zip(entity_registry["entity_id"], entity_registry["name"], strict=True)
+        )
+        entity_options = sorted(sec_fact_catalog["entity_id"].unique().tolist())
+        selected_entity = st.selectbox(
+            "Issuer",
+            entity_options,
+            format_func=lambda entity_id: entity_names.get(entity_id, entity_id),
+            key="sec_issuer",
+        )
+
+        company_catalog = sec_fact_catalog[
+            sec_fact_catalog["entity_id"] == selected_entity
+        ].copy()
+        company_catalog["_priority"] = (
+            company_catalog["tag"].map(FACT_PRIORITY).fillna(1_000)
+        )
+        company_catalog = company_catalog.sort_values(
+            ["_priority", "label", "taxonomy", "unit"]
+        ).reset_index(drop=True)
+        fact_options = list(range(len(company_catalog)))
+
+        def format_fact_option(position: int) -> str:
+            concept = company_catalog.iloc[position]
+            return (
+                f"{concept['label']} · {concept['tag']} "
+                f"[{concept['unit']}]"
+            )
+
+        selected_fact_position = st.selectbox(
+            "Company fact",
+            fact_options,
+            format_func=format_fact_option,
+            key="sec_company_fact",
+        )
+        selected_concept = company_catalog.iloc[selected_fact_position]
+        fact_history = load_fact_history(
+            str(selected_concept["entity_id"]),
+            str(selected_concept["taxonomy"]),
+            str(selected_concept["tag"]),
+            str(selected_concept["unit"]),
+        )
+
+        period_view = st.selectbox(
+            "Period view",
+            ("Annual (10-K)", "Quarterly (10-Q)"),
+            key="sec_period_view",
+        )
+        if period_view == "Annual (10-K)":
+            history_view = fact_history[
+                (fact_history["form"] == "10-K")
+                & (fact_history["fiscal_period"] == "FY")
+            ].copy()
+        else:
+            history_view = fact_history[
+                (fact_history["form"] == "10-Q")
+                & fact_history["fiscal_period"].isin(["Q1", "Q2", "Q3"])
+            ].copy()
+            duration_days = (
+                pd.to_datetime(history_view["period_end"])
+                - pd.to_datetime(history_view["period_start"])
+            ).dt.days
+            history_view = history_view[
+                duration_days.isna() | duration_days.le(120)
+            ].copy()
+            history_view["duration_days"] = duration_days
+
+        chart_data = history_view.dropna(subset=["period_end", "value_numeric"]).copy()
+        if period_view == "Quarterly (10-Q)" and not chart_data.empty:
+            chart_data = (
+                chart_data.sort_values(
+                    ["period_end", "duration_days", "accepted_at"],
+                    ascending=[True, True, False],
+                    na_position="last",
+                )
+                .drop_duplicates(subset=["period_end"], keep="first")
+                .sort_values("period_end")
+            )
+        elif not chart_data.empty:
+            chart_data = (
+                chart_data.sort_values(["period_end", "accepted_at"])
+                .drop_duplicates(subset=["period_end"], keep="last")
+                .sort_values("period_end")
+            )
+
+        if chart_data.empty:
+            st.info(f"No {period_view.lower()} observations are available for this concept.")
+        else:
+            latest_fact = chart_data.iloc[-1]
+            metric_columns = st.columns(4)
+            metric_columns[0].metric(
+                "Latest value",
+                _format_fact_value(latest_fact["value_numeric"], str(latest_fact["unit"])),
+            )
+            metric_columns[1].metric(
+                "Latest period",
+                str(latest_fact["period_end"])[:10],
+            )
+            metric_columns[2].metric(
+                "Normalized observations",
+                f"{int(selected_concept['observation_count']):,}",
+            )
+            metric_columns[3].metric(
+                "Source filings",
+                f"{int(selected_concept['filing_count']):,}",
+            )
+            st.plotly_chart(
+                px.line(
+                    chart_data,
+                    x="period_end",
+                    y="value_numeric",
+                    markers=True,
+                    hover_data=["form", "fiscal_period", "filed_on", "accession_number"],
+                    labels={
+                        "period_end": "Period end",
+                        "value_numeric": str(selected_concept["label"]),
+                    },
+                    title=f"{selected_concept['label']} — {period_view}",
+                ),
+                width="stretch",
+            )
+            with st.expander("View reported observations"):
+                st.dataframe(
+                    fact_history.sort_values("accepted_at", ascending=False),
+                    width="stretch",
+                    hide_index=True,
+                )
+
+    st.markdown("#### Recent material filings")
+    if sec_filings.empty:
+        st.info("No 10-K, 10-Q, or 8-K filing events are available.")
     else:
-        fact_tags = sorted(sec_company_facts["tag"].unique().tolist())
-        selected_fact_tag = st.selectbox("Company fact", fact_tags)
-        selected_facts = sec_company_facts[sec_company_facts["tag"] == selected_fact_tag]
-        st.dataframe(selected_facts, width="stretch", hide_index=True)
+        filing_columns = [
+            "filed_on",
+            "form",
+            "report_date",
+            "accession_number",
+            "primary_document_url",
+        ]
+        st.dataframe(
+            sec_filings[filing_columns],
+            width="stretch",
+            hide_index=True,
+            column_config={
+                "primary_document_url": st.column_config.LinkColumn("SEC filing"),
+            },
+        )
+
+    st.markdown("#### Alternative-data linkage")
+    if exposure_scores.empty:
+        st.info(
+            "The CAT-to-port signal requires monthly Census history. The reviewed mapping "
+            "is ready, but no trade rows have been ingested yet."
+        )
+    else:
+        st.dataframe(exposure_scores, width="stretch", hide_index=True)
+
+    with st.expander("Reviewed exposure mapping and dated entity graph"):
+        st.markdown("##### Commodity exposure registry")
+        st.dataframe(exposure_registry, width="stretch", hide_index=True)
+        st.markdown("##### Entities")
+        st.caption(
+            "Validity dates represent the period supported by cited evidence, "
+            "not an assumed legal inception date."
+        )
+        st.dataframe(entity_registry, width="stretch", hide_index=True)
+        st.markdown("##### External identifiers")
+        st.dataframe(entity_identifiers, width="stretch", hide_index=True)
+        st.markdown("##### Relationships")
+        st.dataframe(entity_relationships, width="stretch", hide_index=True)
 
 with revisions_tab:
     st.caption(

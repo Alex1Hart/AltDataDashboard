@@ -55,6 +55,7 @@ class IngestionService:
                 expected_month=month,
                 expected_port_code=port_code,
                 expected_commodity_code=commodity_code,
+                allow_empty=True,
             )
             payload_sha256 = self.repository.store_raw_payload(run_id, source, raw_payload)
             written = self.repository.upsert_trade_flows(

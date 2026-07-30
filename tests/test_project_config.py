@@ -68,3 +68,47 @@ def test_backfill_skips_successful_slices_and_runs_remaining_work() -> None:
         commodity_code="72",
         country_code=None,
     )
+
+
+def test_backfill_stops_after_repeated_identical_failures() -> None:
+    project = load_project_config(Path("config/portwatch.yml"))
+    policy = project.backfill.model_copy(
+        update={
+            "start_month": date(2026, 5, 1),
+            "end_month": date(2026, 5, 1),
+            "request_delay_seconds": 0,
+            "max_consecutive_failures": 2,
+        }
+    )
+    project = project.model_copy(
+        update={
+            "backfill": policy,
+            "commodities": project.commodities[:3],
+        }
+    )
+    ingestion_service = Mock()
+
+    def fail_slice(**kwargs: object) -> None:
+        try:
+            raise ValueError("shared upstream failure")
+        except ValueError as exc:
+            raise RuntimeError("ingestion failed") from exc
+
+    ingestion_service.ingest_census_month.side_effect = fail_slice
+    repository = Mock()
+    repository.has_successful_trade_slice.return_value = False
+    progress: list[str] = []
+    service = BackfillService(
+        ingestion_service=ingestion_service,
+        repository=repository,
+        sleep_fn=lambda seconds: None,
+        progress_fn=progress.append,
+    )
+
+    summary = service.run(project)
+
+    assert summary.planned == 6
+    assert summary.failed == 2
+    assert summary.aborted
+    assert ingestion_service.ingest_census_month.call_count == 2
+    assert progress[-1] == "backfill aborted after 2 consecutive identical failures"

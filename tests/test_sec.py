@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -15,6 +15,7 @@ from portwatch.ingestion.sec import (
     SecConfigurationError,
     SecEdgarClient,
     SecResponseError,
+    parse_sec_company_facts,
     parse_sec_submissions,
 )
 from portwatch.models import IngestionStatus
@@ -90,7 +91,11 @@ def test_sec_client_resolves_cik_and_normalizes_filings_and_facts() -> None:
 
 def test_sec_client_requires_declared_contact_user_agent() -> None:
     registry = load_company_registry(REGISTRY_PATH)
-    client = SecEdgarClient(Settings(), registry, transport=_sec_transport([]))
+    client = SecEdgarClient(
+        Settings(PORTWATCH_USER_AGENT="PortWatch Test research"),
+        registry,
+        transport=_sec_transport([]),
+    )
 
     with pytest.raises(SecConfigurationError, match="contact email"):
         client.fetch_company("CAT")
@@ -109,6 +114,24 @@ def test_sec_parser_rejects_cik_outside_reviewed_registry() -> None:
             ticker="CAT",
             ingested_at=datetime.now(UTC),
         )
+
+
+def test_sec_company_facts_parser_bounds_the_normalized_history() -> None:
+    registry = load_company_registry(REGISTRY_PATH)
+    payload = json.loads(COMPANY_FACTS_PATH.read_bytes())
+
+    facts = parse_sec_company_facts(
+        payload,
+        registry=registry,
+        expected_entity_id="cat_inc",
+        ticker="CAT",
+        accepted_by_accession={},
+        ingested_at=datetime(2026, 7, 30, tzinfo=UTC),
+        filed_on_or_after=date(2026, 1, 1),
+    )
+
+    assert len(facts) == 2
+    assert {fact.filed_on for fact in facts} == {date(2026, 2, 13)}
 
 
 def test_sec_service_archives_and_idempotently_stores_company_evidence(tmp_path: Path) -> None:
@@ -140,6 +163,23 @@ def test_sec_service_archives_and_idempotently_stores_company_evidence(tmp_path:
     assert repository.execute_scalar("SELECT COUNT(*) FROM raw_payloads") == 2
     assert repository.execute_scalar("SELECT COUNT(*) FROM raw_payload_links") == 4
     assert repository.execute_scalar("SELECT COUNT(*) FROM ingestion_runs") == 2
+    source_counts = repository.source_counts()
+    assert source_counts["sec_filings"] == 2
+    assert source_counts["sec_company_facts"] == 3
+    assert source_counts["sec_company_concepts"] == 2
+    catalog = repository.sec_company_fact_catalog()
+    assert set(catalog["tag"]) == {
+        "Assets",
+        "RevenueFromContractWithCustomerExcludingAssessedTax",
+    }
+    revenue_history = repository.sec_company_fact_history(
+        entity_id="cat_inc",
+        taxonomy="us-gaap",
+        tag="RevenueFromContractWithCustomerExcludingAssessedTax",
+        unit="USD",
+    )
+    assert len(revenue_history) == 2
+    assert set(repository.sec_filings_summary(forms=("10-K",))["form"]) == {"10-K"}
     assert (
         repository.execute_scalar(
             "SELECT COUNT(*) FROM sec_company_facts WHERE acceptance_is_estimated"
@@ -179,6 +219,31 @@ def test_sec_service_archives_and_idempotently_stores_company_evidence(tmp_path:
         )
         == 1
     )
+
+
+def test_sec_service_marks_an_interrupted_run_failed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry = load_company_registry(REGISTRY_PATH)
+    repository = DuckDBRepository(tmp_path / "interrupted-sec.duckdb")
+    client = SecEdgarClient(
+        Settings(PORTWATCH_USER_AGENT="PortWatch Test analyst@example.com"),
+        registry,
+    )
+
+    def interrupt_fetch(ticker: str) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(client, "fetch_company", interrupt_fetch)
+    service = SecEdgarIngestionService(client=client, repository=repository)
+
+    with pytest.raises(KeyboardInterrupt):
+        service.ingest_company("CAT")
+
+    latest_run = repository.recent_runs(limit=1).iloc[0]
+    assert latest_run["status"] == "failed"
+    assert latest_run["error_message"] == "SEC ingestion interrupted by user"
 
 
 def test_sec_cli_command_is_discoverable() -> None:

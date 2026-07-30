@@ -65,3 +65,32 @@ def test_service_audits_failed_run(tmp_path: Path) -> None:
     run = repository.recent_runs(limit=1).iloc[0]
     assert run["status"] == "failed"
     assert "CENSUS_API_KEY is required" in run["error_message"]
+
+
+def test_service_records_a_valid_empty_census_slice_as_successful(tmp_path: Path) -> None:
+    transport = httpx.MockTransport(lambda request: httpx.Response(204, content=b""))
+    repository = DuckDBRepository(tmp_path / "empty-success.duckdb")
+    service = IngestionService(
+        census_client=CensusPortHSClient(
+            Settings(CENSUS_API_KEY="test-key"),
+            transport=transport,
+        ),
+        repository=repository,
+    )
+
+    result = service.ingest_census_month(
+        month=date(2026, 5, 1),
+        port_code="2704",
+        commodity_code="89",
+    )
+
+    assert result.status is IngestionStatus.SUCCEEDED
+    assert result.records_received == 0
+    assert result.records_written == 0
+    assert repository.has_successful_trade_slice(
+        source=result.source,
+        month=date(2026, 5, 1),
+        port_code="2704",
+        commodity_code="89",
+        country_code=None,
+    )

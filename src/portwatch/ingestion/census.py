@@ -47,7 +47,14 @@ class CensusPortHSClient:
         transport: httpx.BaseTransport | None = None,
     ) -> None:
         self.settings = settings
-        self.transport = transport
+        self._client = httpx.Client(
+            timeout=self.settings.http_timeout_seconds,
+            headers={"User-Agent": self.settings.user_agent},
+            transport=transport,
+        )
+
+    def close(self) -> None:
+        self._client.close()
 
     @retry(
         retry=retry_if_exception_type((httpx.TimeoutException, httpx.NetworkError)),
@@ -75,10 +82,12 @@ class CensusPortHSClient:
             raise ValueError("commodity_code must be a two-, four-, or six-digit HS code")
 
         district_code = port_code[:2]
-        geography_port = f"{district_code}{port_code}"
         params: dict[str, str] = {
             "get": ",".join(REQUEST_FIELDS),
-            "for": f"port:{geography_port}",
+            # Census currently returns 204 for documented single-port E81
+            # geographies. District-wide queries remain stable, so normalize
+            # only the requested four-digit Schedule D port below.
+            "for": "port:*",
             "in": f"customs district:{district_code}",
             "time": month.strftime("%Y-%m"),
             "I_COMMODITY": commodity_code,
@@ -87,18 +96,23 @@ class CensusPortHSClient:
         if country_code:
             params["CTY_CODE"] = country_code
 
-        with httpx.Client(
-            timeout=self.settings.http_timeout_seconds,
-            headers={"User-Agent": self.settings.user_agent},
-            transport=self.transport,
-        ) as client:
-            response = client.get(BASE_URL, params=params)
-            response.raise_for_status()
+        response = self._client.get(BASE_URL, params=params)
+        response.raise_for_status()
+
+        if response.status_code == 204 or not response.content.strip():
+            return [], response.content
 
         try:
             payload = response.json()
         except ValueError as exc:
-            raise CensusResponseError("Census returned non-JSON content") from exc
+            preview = response.text[:300]
+            if self.settings.census_api_key:
+                preview = preview.replace(self.settings.census_api_key, "[redacted]")
+            content_type = response.headers.get("content-type", "unknown")
+            raise CensusResponseError(
+                f"Census returned non-JSON content (HTTP {response.status_code}, "
+                f"content-type={content_type}, body={preview!r})"
+            ) from exc
 
         return parse_census_payload(payload, requested_port_code=port_code), response.content
 
@@ -117,12 +131,27 @@ def parse_census_payload(
     missing = set(REQUEST_FIELDS) - set(header)
     if missing:
         raise CensusResponseError(f"Census payload is missing fields: {sorted(missing)}")
+    port_field = next((field for field in ("port", "PORT", "US_PORT") if field in header), None)
+    if port_field is None:
+        raise CensusResponseError("Census payload is missing its port geography field")
 
     flows: list[TradeFlow] = []
     for position, values in enumerate(payload[1:], start=1):
         if not isinstance(values, list) or len(values) != len(header):
             raise CensusResponseError(f"row {position} does not match the response header")
         row = dict(zip(header, values, strict=True))
+        response_port_code = _normalize_response_port_code(
+            row[port_field],
+            requested_port_code=requested_port_code,
+        )
+        if response_port_code != requested_port_code:
+            continue
+        country_code = str(row["CTY_CODE"]).strip()
+        if len(country_code) != 4 or not country_code.isdigit():
+            # Unfiltered Census responses include total and regional rollups
+            # such as "-", "1XXX", and "5XXX". The normalized table is kept
+            # at individual Schedule C country grain.
+            continue
         try:
             month = date(int(row["YEAR"]), int(row["MONTH"]), 1)
             source_updated = _parse_datetime(row.get("LAST_UPDATE"))
@@ -133,7 +162,7 @@ def parse_census_payload(
                     port_name=str(row["PORT_NAME"]).strip(),
                     commodity_code=str(row["I_COMMODITY"]).strip(),
                     commodity_description=str(row["I_COMMODITY_LDESC"]).strip(),
-                    country_code=str(row["CTY_CODE"]).strip(),
+                    country_code=country_code,
                     country_name=str(row["CTY_DESC"]).strip(),
                     general_value_usd=_decimal(row["GEN_VAL_MO"]),
                     vessel_value_usd=_decimal(row["VES_VAL_MO"]),
@@ -148,6 +177,20 @@ def parse_census_payload(
     return flows
 
 
+def _normalize_response_port_code(
+    value: object,
+    *,
+    requested_port_code: str,
+) -> str:
+    raw = str(value).strip()
+    if not raw.isdigit():
+        raise CensusResponseError(f"Census payload contains an invalid port geography: {value}")
+    district_code = requested_port_code[:2]
+    if len(raw) == 6 and raw.startswith(district_code):
+        raw = raw[-4:]
+    return raw.zfill(4)
+
+
 def _decimal(value: object) -> Decimal:
     if value in (None, ""):
         return Decimal(0)
@@ -155,7 +198,7 @@ def _decimal(value: object) -> Decimal:
 
 
 def _parse_datetime(value: object) -> datetime | None:
-    if not value:
+    if value in (None, "", "0", 0):
         return None
     raw = str(value).replace("Z", "+00:00")
     parsed = datetime.fromisoformat(raw)

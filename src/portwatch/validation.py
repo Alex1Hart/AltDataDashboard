@@ -16,8 +16,11 @@ def validate_trade_flows(
     expected_month: date | None = None,
     expected_port_code: str | None = None,
     expected_commodity_code: str | None = None,
+    allow_empty: bool = False,
 ) -> None:
     if not flows:
+        if allow_empty:
+            return
         raise DataValidationError("Census response contained no trade-flow records")
 
     duplicate_keys = [

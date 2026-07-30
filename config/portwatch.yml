@@ -7,6 +7,8 @@ backfill:
   publication_lag_months: 2
   request_delay_seconds: 0.5
   continue_on_error: true
+  # Stop a run when one shared upstream/configuration error repeats.
+  max_consecutive_failures: 5
 
 ports:
   - code: "2704"
@@ -33,4 +35,3 @@ commodities:
     theme: Aircraft and aerospace components
   - code: "89"
     theme: Ships and marine equipment
-

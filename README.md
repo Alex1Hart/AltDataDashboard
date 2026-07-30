@@ -107,6 +107,10 @@ Ingest SEC submissions and structured Company Facts for a reviewed registry issu
 portwatch ingest sec --ticker CAT
 ```
 
+The adapter archives each complete SEC response for reproducibility and normalizes the most
+recent five filing years by default to keep local research runs fast and memory-bounded. Adjust
+`PORTWATCH_SEC_FACT_HISTORY_YEARS` in `.env` when a longer analytical history is required.
+
 Schedule D port codes used in the initial scope:
 
 | Port | Code |

@@ -63,12 +63,14 @@ class SecEdgarClient:
         transport: httpx.BaseTransport | None = None,
         sleep_fn: Callable[[float], None] = sleep,
         monotonic_fn: Callable[[], float] = monotonic,
+        progress_fn: Callable[[str], None] | None = None,
     ) -> None:
         self.settings = settings
         self.registry = registry
         self.transport = transport
         self.sleep_fn = sleep_fn
         self.monotonic_fn = monotonic_fn
+        self.progress_fn = progress_fn or (lambda message: None)
         self._last_request_at: float | None = None
 
     def registered_identity(self, ticker: str) -> tuple[str, str]:
@@ -109,6 +111,7 @@ class SecEdgarClient:
         expected_entity_id, cik = self.registered_identity(normalized_ticker)
         submissions_url = SUBMISSIONS_URL.format(cik=cik)
         company_facts_url = COMPANY_FACTS_URL.format(cik=cik)
+        self.progress_fn(f"SEC 1/4: downloading submissions for {normalized_ticker} ({cik})")
         submissions_payload, submissions_raw = self._get_json(submissions_url)
         ingested_at = datetime.now(UTC)
         filings = parse_sec_submissions(
@@ -118,8 +121,15 @@ class SecEdgarClient:
             ticker=normalized_ticker,
             ingested_at=ingested_at,
         )
+        self.progress_fn(f"SEC 2/4: normalized {len(filings):,} recent filings")
         accepted_by_accession = {filing.accession_number: filing.accepted_at for filing in filings}
+        self.progress_fn("SEC 3/4: downloading and scanning Company Facts")
         company_facts_payload, company_facts_raw = self._get_json(company_facts_url)
+        filed_on_or_after = date(
+            ingested_at.year - self.settings.sec_fact_history_years,
+            1,
+            1,
+        )
         facts = parse_sec_company_facts(
             company_facts_payload,
             registry=self.registry,
@@ -127,6 +137,12 @@ class SecEdgarClient:
             ticker=normalized_ticker,
             accepted_by_accession=accepted_by_accession,
             ingested_at=ingested_at,
+            filed_on_or_after=filed_on_or_after,
+            progress_fn=self.progress_fn,
+        )
+        self.progress_fn(
+            f"SEC 4/4: normalized {len(facts):,} facts filed since "
+            f"{filed_on_or_after.isoformat()}"
         )
         return SecEdgarBatch(
             entity_id=expected_entity_id,
@@ -269,6 +285,8 @@ def parse_sec_company_facts(
     ticker: str,
     accepted_by_accession: Mapping[str, datetime],
     ingested_at: datetime,
+    filed_on_or_after: date | None = None,
+    progress_fn: Callable[[str], None] | None = None,
 ) -> list[SecCompanyFact]:
     cik = _resolve_payload_cik(payload, registry, expected_entity_id, ticker)
     facts_payload = payload.get("facts")
@@ -276,6 +294,7 @@ def parse_sec_company_facts(
         raise SecResponseError("SEC Company Facts payload is missing facts")
 
     facts_by_id: dict[str, SecCompanyFact] = {}
+    observations_scanned = 0
     for taxonomy, taxonomy_payload in facts_payload.items():
         if not isinstance(taxonomy_payload, Mapping):
             raise SecResponseError(f"SEC taxonomy payload is malformed: {taxonomy}")
@@ -291,6 +310,19 @@ def parse_sec_company_facts(
                 if not isinstance(observations, list):
                     raise SecResponseError(f"SEC fact observations are malformed: {taxonomy}.{tag}")
                 for observation in observations:
+                    observations_scanned += 1
+                    if progress_fn is not None and observations_scanned % 25_000 == 0:
+                        progress_fn(
+                            f"SEC 3/4: scanned {observations_scanned:,} observations; "
+                            f"retained {len(facts_by_id):,}"
+                        )
+                    if not isinstance(observation, Mapping):
+                        raise SecResponseError(
+                            f"SEC fact observation is malformed: {taxonomy}.{tag}"
+                        )
+                    filed_on = _parse_date(observation.get("filed"), "filed")
+                    if filed_on_or_after is not None and filed_on < filed_on_or_after:
+                        continue
                     fact = _parse_company_fact_observation(
                         observation,
                         entity_id=expected_entity_id,
@@ -302,6 +334,7 @@ def parse_sec_company_facts(
                         unit=str(unit),
                         accepted_by_accession=accepted_by_accession,
                         ingested_at=ingested_at,
+                        filed_on=filed_on,
                     )
                     existing = facts_by_id.get(fact.fact_id)
                     if existing is not None and existing.value != fact.value:
@@ -324,6 +357,7 @@ def _parse_company_fact_observation(
     unit: str,
     accepted_by_accession: Mapping[str, datetime],
     ingested_at: datetime,
+    filed_on: date | None = None,
 ) -> SecCompanyFact:
     if not isinstance(payload, Mapping):
         raise SecResponseError(f"SEC fact observation is malformed: {taxonomy}.{tag}")
@@ -332,7 +366,7 @@ def _parse_company_fact_observation(
     except (KeyError, InvalidOperation, ValueError) as exc:
         raise SecResponseError(f"SEC fact value is invalid: {taxonomy}.{tag}") from exc
     accession_number = _required_text(payload, "accn", f"SEC fact {taxonomy}.{tag}")
-    filed_on = _parse_date(payload.get("filed"), "filed")
+    filed_on = filed_on or _parse_date(payload.get("filed"), "filed")
     accepted_at = accepted_by_accession.get(accession_number)
     acceptance_is_estimated = accepted_at is None
     if accepted_at is None:

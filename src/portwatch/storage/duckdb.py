@@ -394,46 +394,84 @@ class DuckDBRepository:
                 connection,
                 "SELECT COUNT(*) FROM sec_filings",
             )
-            for filing in filings:
-                connection.execute(
-                    """
-                    INSERT OR IGNORE INTO sec_filings VALUES (
-                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-                    )
-                    """,
-                    [
-                        filing.accession_number,
-                        filing.entity_id,
-                        filing.cik,
-                        filing.company_name,
-                        filing.form,
-                        filing.filed_on,
-                        filing.report_date,
-                        filing.accepted_at,
-                        filing.primary_document,
-                        filing.primary_document_url,
-                        filing.is_xbrl,
-                        filing.is_inline_xbrl,
-                        filing.source.value,
-                        filing.ingested_at,
-                        run_id,
-                        filing.accepted_at,
-                        filing.ingested_at,
-                        submissions_payload_sha256,
-                    ],
+            filing_rows = [
+                (
+                    filing.accession_number,
+                    filing.entity_id,
+                    filing.cik,
+                    filing.company_name,
+                    filing.form,
+                    filing.filed_on,
+                    filing.report_date,
+                    filing.accepted_at,
+                    filing.primary_document,
+                    filing.primary_document_url,
+                    filing.is_xbrl,
+                    filing.is_inline_xbrl,
+                    filing.source.value,
+                    filing.ingested_at,
+                    run_id,
+                    filing.accepted_at,
+                    filing.ingested_at,
+                    submissions_payload_sha256,
                 )
-            fact_changes = 0
-            for fact in facts:
-                existing = connection.execute(
+                for filing in filings
+            ]
+            if filing_rows:
+                filing_frame = pd.DataFrame.from_records(
+                    filing_rows,
+                    columns=(
+                        "accession_number",
+                        "entity_id",
+                        "cik",
+                        "company_name",
+                        "form",
+                        "filed_on",
+                        "report_date",
+                        "accepted_at",
+                        "primary_document",
+                        "primary_document_url",
+                        "is_xbrl",
+                        "is_inline_xbrl",
+                        "source",
+                        "ingested_at",
+                        "run_id",
+                        "publication_at",
+                        "available_at",
+                        "payload_sha256",
+                    ),
+                )
+                connection.register("_sec_filing_batch", filing_frame)
+                try:
+                    connection.execute(
+                        "INSERT OR IGNORE INTO sec_filings SELECT * FROM _sec_filing_batch"
+                    )
+                finally:
+                    connection.unregister("_sec_filing_batch")
+
+            existing_by_id: dict[str, tuple[Any, ...]] = {}
+            if facts:
+                existing_rows = connection.execute(
                     """
-                    SELECT revision_number, label, description, value_text, accepted_at,
+                    SELECT fact_id, revision_number, label, description, value_text, accepted_at,
                            acceptance_is_estimated, filed_on, fiscal_year, fiscal_period,
                            form, frame
                     FROM sec_company_facts
-                    WHERE fact_id = ?
+                    WHERE entity_id = ?
                     """,
-                    [fact.fact_id],
-                ).fetchone()
+                    [facts[0].entity_id],
+                ).fetchall()
+                existing_by_id = {
+                    str(existing_row[0]): tuple(existing_row[1:])
+                    for existing_row in existing_rows
+                }
+
+            fact_changes = 0
+            fact_rows: list[tuple[Any, ...]] = []
+            fact_revision_rows: list[tuple[Any, ...]] = []
+            revisions_to_close: list[tuple[datetime, str]] = []
+            for fact in facts:
+                existing = existing_by_id.get(fact.fact_id)
                 value_text = format(fact.value, "f")
                 candidate = (
                     fact.label,
@@ -451,13 +489,7 @@ class DuckDBRepository:
                     continue
                 revision_number = 1 if existing is None else int(existing[0]) + 1
                 if existing is not None:
-                    connection.execute(
-                        """
-                        UPDATE sec_company_fact_revisions SET valid_until = ?
-                        WHERE fact_id = ? AND valid_until IS NULL
-                        """,
-                        [fact.ingested_at, fact.fact_id],
-                    )
+                    revisions_to_close.append((fact.ingested_at, fact.fact_id))
                 row = (
                     fact.fact_id,
                     fact.entity_id,
@@ -486,25 +518,77 @@ class DuckDBRepository:
                     company_facts_payload_sha256,
                     revision_number,
                 )
-                connection.execute(
-                    """
-                    INSERT OR REPLACE INTO sec_company_facts VALUES (
-                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                        ?, ?, ?, ?, ?, ?
-                    )
-                    """,
-                    row,
-                )
-                connection.execute(
-                    """
-                    INSERT INTO sec_company_fact_revisions VALUES (
-                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                        ?, ?, ?, ?, ?, ?, ?, ?
-                    )
-                    """,
-                    (*row, fact.ingested_at, None),
-                )
+                fact_rows.append(row)
+                fact_revision_rows.append((*row, fact.ingested_at, None))
                 fact_changes += 1
+
+            if revisions_to_close:
+                closing_frame = pd.DataFrame.from_records(
+                    revisions_to_close,
+                    columns=("valid_until", "fact_id"),
+                )
+                connection.register("_sec_revisions_to_close", closing_frame)
+                try:
+                    connection.execute(
+                        """
+                        UPDATE sec_company_fact_revisions AS revisions
+                        SET valid_until = changes.valid_until
+                        FROM _sec_revisions_to_close AS changes
+                        WHERE revisions.fact_id = changes.fact_id
+                          AND revisions.valid_until IS NULL
+                        """
+                    )
+                finally:
+                    connection.unregister("_sec_revisions_to_close")
+            if fact_rows:
+                fact_columns = (
+                    "fact_id",
+                    "entity_id",
+                    "cik",
+                    "taxonomy",
+                    "tag",
+                    "label",
+                    "description",
+                    "unit",
+                    "value_text",
+                    "period_start",
+                    "period_end",
+                    "filed_on",
+                    "accepted_at",
+                    "acceptance_is_estimated",
+                    "accession_number",
+                    "fiscal_year",
+                    "fiscal_period",
+                    "form",
+                    "frame",
+                    "source",
+                    "ingested_at",
+                    "run_id",
+                    "publication_at",
+                    "available_at",
+                    "payload_sha256",
+                    "revision_number",
+                )
+                fact_frame = pd.DataFrame.from_records(fact_rows, columns=fact_columns)
+                revision_frame = pd.DataFrame.from_records(
+                    fact_revision_rows,
+                    columns=(*fact_columns, "valid_from", "valid_until"),
+                )
+                connection.register("_sec_fact_batch", fact_frame)
+                connection.register("_sec_fact_revision_batch", revision_frame)
+                try:
+                    connection.execute(
+                        "INSERT OR REPLACE INTO sec_company_facts SELECT * FROM _sec_fact_batch"
+                    )
+                    connection.execute(
+                        """
+                        INSERT INTO sec_company_fact_revisions
+                        SELECT * FROM _sec_fact_revision_batch
+                        """
+                    )
+                finally:
+                    connection.unregister("_sec_fact_revision_batch")
+                    connection.unregister("_sec_fact_batch")
             filing_count_after = self._connection_scalar_int(
                 connection,
                 "SELECT COUNT(*) FROM sec_filings",
@@ -737,7 +821,7 @@ class DuckDBRepository:
         connection.execute("BEGIN TRANSACTION")
         try:
             yield
-        except Exception:
+        except BaseException:
             connection.execute("ROLLBACK")
             raise
         else:
@@ -801,19 +885,32 @@ class DuckDBRepository:
                 """
             ).fetchdf()
 
-    def sec_filings_summary(self, limit: int = 100) -> pd.DataFrame:
+    def sec_filings_summary(
+        self,
+        limit: int = 100,
+        *,
+        forms: tuple[str, ...] | None = None,
+    ) -> pd.DataFrame:
+        where_clause = ""
+        parameters: list[Any] = []
+        if forms:
+            placeholders = ", ".join("?" for _ in forms)
+            where_clause = f"WHERE form IN ({placeholders})"
+            parameters.extend(forms)
+        parameters.append(limit)
         with self._connect() as connection:
             return connection.execute(
-                """
+                f"""
                 SELECT entity_id, cik, company_name, accession_number, form,
                        filed_on, report_date, accepted_at, primary_document_url,
                        is_xbrl, is_inline_xbrl, publication_at, available_at,
                        payload_sha256
                 FROM sec_filings
+                {where_clause}
                 ORDER BY accepted_at DESC
                 LIMIT ?
                 """,
-                [limit],
+                parameters,
             ).fetchdf()
 
     def sec_company_facts_summary(self, limit: int = 500) -> pd.DataFrame:
@@ -832,6 +929,74 @@ class DuckDBRepository:
                 """,
                 [limit],
             ).fetchdf()
+
+    def sec_company_fact_catalog(self) -> pd.DataFrame:
+        """Return one compact row per available company concept and unit."""
+        with self._connect() as connection:
+            return connection.execute(
+                """
+                SELECT entity_id, cik, taxonomy, tag, label, unit,
+                       COUNT(*) AS observation_count,
+                       COUNT(DISTINCT accession_number) AS filing_count,
+                       MIN(period_end) AS first_period_end,
+                       MAX(period_end) AS latest_period_end,
+                       MAX(filed_on) AS latest_filed_on
+                FROM sec_company_facts
+                GROUP BY entity_id, cik, taxonomy, tag, label, unit
+                ORDER BY entity_id, taxonomy, label, unit
+                """
+            ).fetchdf()
+
+    def sec_company_fact_history(
+        self,
+        *,
+        entity_id: str,
+        taxonomy: str,
+        tag: str,
+        unit: str,
+        limit: int = 1_000,
+    ) -> pd.DataFrame:
+        """Query the complete normalized history for one selected company concept."""
+        with self._connect() as connection:
+            return connection.execute(
+                """
+                SELECT entity_id, cik, taxonomy, tag, label, unit, value_text,
+                       TRY_CAST(value_text AS DOUBLE) AS value_numeric,
+                       period_start, period_end, filed_on, accepted_at,
+                       acceptance_is_estimated, accession_number, fiscal_year,
+                       fiscal_period, form, frame, publication_at, available_at,
+                       payload_sha256, revision_number
+                FROM sec_company_facts
+                WHERE entity_id = ? AND taxonomy = ? AND tag = ? AND unit = ?
+                ORDER BY period_end, accepted_at
+                LIMIT ?
+                """,
+                [entity_id, taxonomy, tag, unit, limit],
+            ).fetchdf()
+
+    def source_counts(self) -> dict[str, int]:
+        """Return full-table record counts for dashboard coverage indicators."""
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT
+                    (SELECT COUNT(*) FROM trade_flows),
+                    (SELECT COUNT(*) FROM port_operations),
+                    (SELECT COUNT(*) FROM sec_filings),
+                    (SELECT COUNT(*) FROM sec_company_facts),
+                    (SELECT COUNT(DISTINCT tag) FROM sec_company_facts)
+                """
+            ).fetchone()
+        if row is None:
+            raise RuntimeError("expected source-count query to return one row")
+        names = (
+            "trade_flows",
+            "port_operations",
+            "sec_filings",
+            "sec_company_facts",
+            "sec_company_concepts",
+        )
+        return {name: int(value) for name, value in zip(names, row, strict=True)}
 
     def recent_runs(self, limit: int = 20) -> pd.DataFrame:
         with self._connect() as connection:

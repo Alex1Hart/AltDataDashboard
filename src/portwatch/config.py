@@ -43,6 +43,12 @@ class Settings(BaseSettings):
         ge=0.1,
         alias="PORTWATCH_SEC_REQUEST_INTERVAL_SECONDS",
     )
+    sec_fact_history_years: int = Field(
+        default=5,
+        ge=1,
+        le=20,
+        alias="PORTWATCH_SEC_FACT_HISTORY_YEARS",
+    )
     log_level: str = Field(default="INFO", alias="PORTWATCH_LOG_LEVEL")
 
 

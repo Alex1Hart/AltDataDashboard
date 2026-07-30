@@ -29,6 +29,7 @@ class BackfillPolicy(BaseModel):
     publication_lag_months: int = Field(default=2, ge=1, le=12)
     request_delay_seconds: float = Field(default=0.5, ge=0, le=60)
     continue_on_error: bool = True
+    max_consecutive_failures: int = Field(default=5, ge=1, le=100)
 
     @model_validator(mode="after")
     def validate_month_boundaries(self) -> BackfillPolicy:

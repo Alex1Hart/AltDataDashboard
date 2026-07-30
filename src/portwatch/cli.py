@@ -55,16 +55,20 @@ def ingest_census(
 ) -> None:
     """Ingest one monthly Census port/commodity slice."""
     settings = get_settings()
+    census_client = CensusPortHSClient(settings)
     service = IngestionService(
-        census_client=CensusPortHSClient(settings),
+        census_client=census_client,
         repository=DuckDBRepository(settings.database_path),
     )
-    result = service.ingest_census_month(
-        month=_parse_month(month),
-        port_code=port,
-        commodity_code=commodity,
-        country_code=country,
-    )
+    try:
+        result = service.ingest_census_month(
+            month=_parse_month(month),
+            port_code=port,
+            commodity_code=commodity,
+            country_code=country,
+        )
+    finally:
+        census_client.close()
     typer.echo(result.model_dump_json(indent=2))
 
 
@@ -87,9 +91,14 @@ def ingest_sec_edgar(
     """Ingest SEC submissions and Company Facts for a reviewed registry issuer."""
     settings = get_settings()
     registry = load_company_registry(settings.company_registry_path)
+
+    def progress(message: str) -> None:
+        typer.echo(message, err=True)
+
     service = SecEdgarIngestionService(
-        client=SecEdgarClient(settings, registry),
+        client=SecEdgarClient(settings, registry, progress_fn=progress),
         repository=DuckDBRepository(settings.database_path),
+        progress_fn=progress,
     )
     result = service.ingest_company(ticker)
     typer.echo(result.model_dump_json(indent=2))
@@ -115,19 +124,28 @@ def backfill(
         typer.echo("CENSUS_API_KEY is required before running a backfill.", err=True)
         raise typer.Exit(2)
     repository = DuckDBRepository(settings.database_path)
+    census_client = CensusPortHSClient(settings)
     ingestion_service = IngestionService(
-        census_client=CensusPortHSClient(settings),
+        census_client=census_client,
         repository=repository,
     )
+
+    def progress(message: str) -> None:
+        typer.echo(message, err=True)
+
     service = BackfillService(
         ingestion_service=ingestion_service,
         repository=repository,
+        progress_fn=progress,
     )
-    project = load_project_config(config_path or settings.project_config_path)
-    summary = service.run(project, force=force)
+    try:
+        project = load_project_config(config_path or settings.project_config_path)
+        summary = service.run(project, force=force)
+    finally:
+        census_client.close()
     typer.echo(
         f"planned={summary.planned} succeeded={summary.succeeded} "
-        f"skipped={summary.skipped} failed={summary.failed}"
+        f"skipped={summary.skipped} failed={summary.failed} aborted={summary.aborted}"
     )
 
 
