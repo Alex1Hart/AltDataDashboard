@@ -1,0 +1,100 @@
+{
+  "spending_level": "awards",
+  "limit": 100,
+  "page_metadata": {
+    "page": 1,
+    "hasNext": false
+  },
+  "results": [
+    {
+      "internal_id": 1001,
+      "Award ID": "W56HZV26C0001",
+      "Recipient Name": "CATERPILLAR INC.",
+      "Recipient UEI": "ABCDEF123456",
+      "recipient_id": "recipient-caterpillar",
+      "generated_internal_id": "CONT_AWD_W56HZV26C0001_9700_-NONE-_-NONE-",
+      "Award Amount": 125000000.0,
+      "Total Outlays": 25000000.0,
+      "Description": "Heavy construction equipment and support",
+      "Base Obligation Date": "2026-01-15",
+      "Start Date": "2026-01-15",
+      "End Date": "2028-01-14",
+      "Last Modified Date": "2026-06-30",
+      "Awarding Agency": "Department of Defense",
+      "Awarding Sub Agency": "Department of the Army",
+      "Funding Agency": "Department of Defense",
+      "Funding Sub Agency": "Department of the Army",
+      "Contract Award Type": "DEFINITIVE CONTRACT",
+      "NAICS": {
+        "code": "333120",
+        "description": "CONSTRUCTION MACHINERY MANUFACTURING"
+      },
+      "PSC": {
+        "code": "3805",
+        "description": "EARTH MOVING AND EXCAVATING EQUIPMENT"
+      },
+      "Place of Performance Country Code": "USA",
+      "Place of Performance State Code": "IL"
+    },
+    {
+      "internal_id": 1002,
+      "Award ID": "47QMCA26F0002",
+      "Recipient Name": "CATERPILLAR FINANCIAL SERVICES CORPORATION",
+      "Recipient UEI": null,
+      "recipient_id": null,
+      "generated_internal_id": "CONT_AWD_47QMCA26F0002_4735_GS00F0000_4735",
+      "Award Amount": 15000000.0,
+      "Total Outlays": null,
+      "Description": "Equipment financing services",
+      "Base Obligation Date": "2026-03-01",
+      "Start Date": "2026-03-01",
+      "End Date": "2027-02-28",
+      "Last Modified Date": "2026-03-02T12:30:00Z",
+      "Awarding Agency": "General Services Administration",
+      "Awarding Sub Agency": "Federal Acquisition Service",
+      "Funding Agency": "General Services Administration",
+      "Funding Sub Agency": "Federal Acquisition Service",
+      "Contract Award Type": "DELIVERY ORDER",
+      "NAICS": {
+        "code": "522220",
+        "description": "SALES FINANCING"
+      },
+      "PSC": {
+        "code": "R710",
+        "description": "FINANCIAL SERVICES"
+      },
+      "Place of Performance Country Code": "USA",
+      "Place of Performance State Code": "TN"
+    },
+    {
+      "internal_id": 1003,
+      "Award ID": "FAKE26C0003",
+      "Recipient Name": "CATERPILLAR PEST CONTROL LLC",
+      "Recipient UEI": "ZZZZZZ999999",
+      "recipient_id": "unrelated-recipient",
+      "generated_internal_id": "CONT_AWD_FAKE26C0003_0000_-NONE-_-NONE-",
+      "Award Amount": 500000.0,
+      "Total Outlays": 100000.0,
+      "Description": "Unrelated recipient returned by fuzzy source search",
+      "Base Obligation Date": "2026-04-01",
+      "Start Date": "2026-04-01",
+      "End Date": "2027-03-31",
+      "Last Modified Date": "2026-04-02",
+      "Awarding Agency": "Department of Agriculture",
+      "Awarding Sub Agency": null,
+      "Funding Agency": "Department of Agriculture",
+      "Funding Sub Agency": null,
+      "Contract Award Type": "DEFINITIVE CONTRACT",
+      "NAICS": {
+        "code": "561710",
+        "description": "EXTERMINATING AND PEST CONTROL SERVICES"
+      },
+      "PSC": {
+        "code": "S207",
+        "description": "INSECT AND RODENT CONTROL"
+      },
+      "Place of Performance Country Code": "USA",
+      "Place of Performance State Code": "TX"
+    }
+  ]
+}

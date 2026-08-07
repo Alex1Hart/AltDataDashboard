@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Annotated
 
@@ -10,9 +10,11 @@ import typer
 
 from portwatch.backfill import BackfillService
 from portwatch.config import get_settings
+from portwatch.contract_service import FederalContractIngestionService
 from portwatch.ingestion.census import CensusPortHSClient
 from portwatch.ingestion.port_of_la import PortOfLosAngelesClient
 from portwatch.ingestion.sec import SecEdgarClient
+from portwatch.ingestion.usaspending import USAspendingClient
 from portwatch.port_service import PortOperationsIngestionService
 from portwatch.project_config import load_project_config
 from portwatch.registry import load_company_registry
@@ -35,6 +37,13 @@ def _parse_month(value: str) -> date:
     except ValueError as exc:
         raise typer.BadParameter("month must use YYYY-MM format") from exc
     return date(parsed.year, parsed.month, 1)
+
+
+def _parse_date(value: str, *, option_name: str) -> date:
+    try:
+        return date.fromisoformat(value)
+    except ValueError as exc:
+        raise typer.BadParameter(f"{option_name} must use YYYY-MM-DD format") from exc
 
 
 @app.command("init-db")
@@ -101,6 +110,48 @@ def ingest_sec_edgar(
         progress_fn=progress,
     )
     result = service.ingest_company(ticker)
+    typer.echo(result.model_dump_json(indent=2))
+
+
+@ingest_app.command("contracts")
+def ingest_federal_contracts(
+    ticker: str = typer.Option(..., help="Registered public-company ticker, e.g. CAT."),
+    start: str | None = typer.Option(
+        None,
+        help="Award action window start in YYYY-MM-DD; defaults to trailing three years.",
+    ),
+    end: str | None = typer.Option(
+        None,
+        help="Award action window end in YYYY-MM-DD; defaults to today.",
+    ),
+) -> None:
+    """Ingest entity-resolved prime contract awards from USAspending."""
+    settings = get_settings()
+    registry = load_company_registry(settings.company_registry_path)
+    end_date = date.today() if end is None else _parse_date(end, option_name="end")
+    start_date = (
+        end_date - timedelta(days=3 * 365)
+        if start is None
+        else _parse_date(start, option_name="start")
+    )
+
+    def progress(message: str) -> None:
+        typer.echo(message, err=True)
+
+    client = USAspendingClient(settings, registry, progress_fn=progress)
+    service = FederalContractIngestionService(
+        client=client,
+        repository=DuckDBRepository(settings.database_path),
+        progress_fn=progress,
+    )
+    try:
+        result = service.ingest_company(
+            ticker,
+            start_date=start_date,
+            end_date=end_date,
+        )
+    finally:
+        client.close()
     typer.echo(result.model_dump_json(indent=2))
 
 

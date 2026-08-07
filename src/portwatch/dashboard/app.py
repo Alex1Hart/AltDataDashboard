@@ -6,6 +6,10 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
+from portwatch.analytics.contracts import (
+    compute_contract_company_signals,
+    monthly_contract_awards,
+)
 from portwatch.analytics.signals import compute_trade_signals, latest_trade_signals
 from portwatch.config import get_settings
 from portwatch.registry import (
@@ -43,6 +47,17 @@ def _format_number(value: Any) -> str:
     return "—" if pd.isna(value) else f"{float(value):.2f}"
 
 
+def _format_money(value: Any) -> str:
+    if pd.isna(value):
+        return "—"
+    numeric = float(value)
+    if abs(numeric) >= 1e9:
+        return f"${numeric / 1e9:,.2f}B"
+    if abs(numeric) >= 1e6:
+        return f"${numeric / 1e6:,.1f}M"
+    return f"${numeric:,.0f}"
+
+
 def _format_fact_value(value: Any, unit: str) -> str:
     if pd.isna(value):
         return "—"
@@ -74,6 +89,9 @@ def load_data() -> tuple[
     pd.DataFrame,
     pd.DataFrame,
     pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
 ]:
     settings = get_settings()
     repository = DuckDBRepository(settings.database_path)
@@ -81,6 +99,7 @@ def load_data() -> tuple[
     flows = repository.trade_flow_summary()
     signals = compute_trade_signals(flows)
     registry = load_company_registry(settings.company_registry_path)
+    contract_awards = repository.federal_contract_awards_summary()
     return (
         flows,
         signals,
@@ -92,6 +111,9 @@ def load_data() -> tuple[
         registry_relationships_frame(registry),
         repository.sec_filings_summary(forms=("10-K", "10-Q", "8-K")),
         repository.sec_company_fact_catalog(),
+        contract_awards,
+        compute_contract_company_signals(contract_awards),
+        repository.federal_contract_award_revisions(),
         repository.trade_flow_revisions(),
     )
 
@@ -129,6 +151,9 @@ def load_fact_history(
     entity_relationships,
     sec_filings,
     sec_fact_catalog,
+    contract_awards,
+    contract_signals,
+    contract_revisions,
     revisions,
 ) = load_data()
 settings = get_settings()
@@ -142,19 +167,32 @@ st.caption(
     "vintage-aware provenance, and contextual port and trade signals"
 )
 
-coverage_columns = st.columns(5)
+coverage_columns = st.columns(6)
 coverage_columns[0].metric(
     "Tracked companies",
     f"{exposure_registry['ticker'].nunique():,}",
 )
 coverage_columns[1].metric("SEC filings", f"{source_counts['sec_filings']:,}")
 coverage_columns[2].metric("SEC facts", f"{source_counts['sec_company_facts']:,}")
-coverage_columns[3].metric("Trade rows", f"{source_counts['trade_flows']:,}")
-coverage_columns[4].metric("Port observations", f"{source_counts['port_operations']:,}")
+coverage_columns[3].metric(
+    "Contract awards",
+    f"{source_counts['federal_contract_awards']:,}",
+)
+coverage_columns[4].metric("Trade rows", f"{source_counts['trade_flows']:,}")
+coverage_columns[5].metric("Port observations", f"{source_counts['port_operations']:,}")
 
-company_tab, overview_tab, signals_tab, operations_tab, revisions_tab, health_tab = st.tabs(
+(
+    company_tab,
+    contracts_tab,
+    overview_tab,
+    signals_tab,
+    operations_tab,
+    revisions_tab,
+    health_tab,
+) = st.tabs(
     [
         "Company research",
+        "ContractWatch",
         "Market overview",
         "Research signals",
         "Port operations",
@@ -162,6 +200,115 @@ company_tab, overview_tab, signals_tab, operations_tab, revisions_tab, health_ta
         "Pipeline health",
     ]
 )
+
+with contracts_tab:
+    st.subheader("ContractWatch: company-linked federal prime awards")
+    st.caption(
+        "Award Amount is USAspending's current cumulative federal obligation for an award. "
+        "It is not company revenue, funded backlog, or remaining contract value."
+    )
+    if contract_awards.empty:
+        st.info(
+            "Load a reviewed issuer's federal awards with "
+            "`portwatch ingest contracts --ticker CAT`. No API key is required."
+        )
+    else:
+        contract_tickers = sorted(contract_awards["ticker"].unique().tolist())
+        selected_contract_ticker = st.selectbox(
+            "Company",
+            contract_tickers,
+            key="contractwatch_ticker",
+        )
+        selected_awards = contract_awards[
+            contract_awards["ticker"] == selected_contract_ticker
+        ].copy()
+        selected_signal = contract_signals[contract_signals["ticker"] == selected_contract_ticker]
+        if not selected_signal.empty:
+            signal = selected_signal.iloc[0]
+            contract_metrics = st.columns(5)
+            contract_metrics[0].metric(
+                "Current obligations",
+                _format_money(signal["total_current_obligations_usd"]),
+                help="Cumulative federal obligations across the current award snapshots.",
+            )
+            contract_metrics[1].metric(
+                "TTM new awards",
+                _format_money(signal["ttm_new_award_obligations_usd"]),
+                _format_percent(signal["ttm_new_award_yoy"]),
+                help="Current award value grouped by each award's base obligation date.",
+            )
+            contract_metrics[2].metric("Awards", f"{int(signal['award_count']):,}")
+            contract_metrics[3].metric(
+                "12m expiration wall",
+                _format_money(signal["next_12m_expiring_award_value_usd"]),
+                help="Current value of awards whose period of performance ends in 12 months.",
+            )
+            contract_metrics[4].metric(
+                "Agency HHI",
+                _format_number(signal["agency_hhi"]),
+                help="Concentration of positive current obligations by awarding agency.",
+            )
+
+        monthly_awards = monthly_contract_awards(selected_awards)
+        st.plotly_chart(
+            px.bar(
+                monthly_awards,
+                x="award_month",
+                y="award_amount_usd",
+                hover_data=["award_count"],
+                labels={
+                    "award_month": "Base obligation month",
+                    "award_amount_usd": "Current award obligations (USD)",
+                },
+                title=f"{selected_contract_ticker} current awards by original award month",
+            ),
+            width="stretch",
+        )
+
+        agency_awards = (
+            selected_awards.dropna(subset=["awarding_agency"])
+            .groupby("awarding_agency", as_index=False)["award_amount_usd"]
+            .sum()
+            .sort_values("award_amount_usd", ascending=False)
+            .head(12)
+        )
+        if not agency_awards.empty:
+            st.plotly_chart(
+                px.bar(
+                    agency_awards,
+                    x="award_amount_usd",
+                    y="awarding_agency",
+                    orientation="h",
+                    labels={
+                        "award_amount_usd": "Current obligations (USD)",
+                        "awarding_agency": "Awarding agency",
+                    },
+                    title="Awarding-agency exposure",
+                ),
+                width="stretch",
+            )
+
+        st.markdown("#### Matched award evidence")
+        st.dataframe(
+            selected_awards[
+                [
+                    "base_obligation_date",
+                    "award_id",
+                    "recipient_name",
+                    "award_amount_usd",
+                    "end_date",
+                    "awarding_agency",
+                    "naics_code",
+                    "psc_code",
+                    "match_method",
+                    "revision_number",
+                    "source_url",
+                ]
+            ],
+            width="stretch",
+            hide_index=True,
+            column_config={"source_url": st.column_config.LinkColumn("USAspending award")},
+        )
 
 with overview_tab:
     if flows.empty:
@@ -263,9 +410,7 @@ with company_tab:
     if sec_fact_catalog.empty:
         st.info("Run `portwatch ingest sec --ticker CAT` to load reviewed SEC evidence.")
     else:
-        entity_names = dict(
-            zip(entity_registry["entity_id"], entity_registry["name"], strict=True)
-        )
+        entity_names = dict(zip(entity_registry["entity_id"], entity_registry["name"], strict=True))
         entity_options = sorted(sec_fact_catalog["entity_id"].unique().tolist())
         selected_entity = st.selectbox(
             "Issuer",
@@ -274,12 +419,8 @@ with company_tab:
             key="sec_issuer",
         )
 
-        company_catalog = sec_fact_catalog[
-            sec_fact_catalog["entity_id"] == selected_entity
-        ].copy()
-        company_catalog["_priority"] = (
-            company_catalog["tag"].map(FACT_PRIORITY).fillna(1_000)
-        )
+        company_catalog = sec_fact_catalog[sec_fact_catalog["entity_id"] == selected_entity].copy()
+        company_catalog["_priority"] = company_catalog["tag"].map(FACT_PRIORITY).fillna(1_000)
         company_catalog = company_catalog.sort_values(
             ["_priority", "label", "taxonomy", "unit"]
         ).reset_index(drop=True)
@@ -287,10 +428,7 @@ with company_tab:
 
         def format_fact_option(position: int) -> str:
             concept = company_catalog.iloc[position]
-            return (
-                f"{concept['label']} · {concept['tag']} "
-                f"[{concept['unit']}]"
-            )
+            return f"{concept['label']} · {concept['tag']} [{concept['unit']}]"
 
         selected_fact_position = st.selectbox(
             "Company fact",
@@ -313,8 +451,7 @@ with company_tab:
         )
         if period_view == "Annual (10-K)":
             history_view = fact_history[
-                (fact_history["form"] == "10-K")
-                & (fact_history["fiscal_period"] == "FY")
+                (fact_history["form"] == "10-K") & (fact_history["fiscal_period"] == "FY")
             ].copy()
         else:
             history_view = fact_history[
@@ -325,9 +462,7 @@ with company_tab:
                 pd.to_datetime(history_view["period_end"])
                 - pd.to_datetime(history_view["period_start"])
             ).dt.days
-            history_view = history_view[
-                duration_days.isna() | duration_days.le(120)
-            ].copy()
+            history_view = history_view[duration_days.isna() | duration_days.le(120)].copy()
             history_view["duration_days"] = duration_days
 
         chart_data = history_view.dropna(subset=["period_end", "value_numeric"]).copy()
@@ -439,6 +574,13 @@ with revisions_tab:
         "`available_at` is the first time PortWatch could have used a vintage; "
         "`valid_until` closes it when a changed value arrives."
     )
+    st.markdown("#### Federal contract award vintages")
+    if contract_revisions.empty:
+        st.info("No federal contract award vintages have been recorded.")
+    else:
+        st.dataframe(contract_revisions, width="stretch", hide_index=True)
+
+    st.markdown("#### Trade-flow vintages")
     if revisions.empty:
         st.info("No observation vintages have been recorded.")
     else:

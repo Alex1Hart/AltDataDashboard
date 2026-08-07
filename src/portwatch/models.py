@@ -11,6 +11,7 @@ class SourceName(StrEnum):
     CENSUS_PORT_HS = "census_port_hs"
     PORT_OF_LA_CONTAINER_STATS = "port_of_la_container_stats"
     SEC_EDGAR = "sec_edgar"
+    USA_SPENDING_CONTRACT_AWARDS = "usaspending_contract_awards"
 
 
 class IngestionStatus(StrEnum):
@@ -50,8 +51,15 @@ class EntityIdentifierScheme(StrEnum):
     SEC_CIK = "sec_cik"
     LEI = "lei"
     UEI = "uei"
+    USA_SPENDING_RECIPIENT_ID = "usaspending_recipient_id"
     EPA_FRS = "epa_frs"
     OSHA_ESTABLISHMENT = "osha_establishment"
+
+
+class ContractMatchMethod(StrEnum):
+    UEI = "uei"
+    RECIPIENT_ID = "recipient_id"
+    REVIEWED_NAME = "reviewed_name"
 
 
 class EntityRelationshipType(StrEnum):
@@ -199,6 +207,66 @@ class SecCompanyFact(BaseModel):
     def period_must_be_ordered(self) -> SecCompanyFact:
         if self.period_start is not None and self.period_start > self.period_end:
             raise ValueError("SEC fact period_start must not follow period_end")
+        return self
+
+
+class FederalContractAward(BaseModel):
+    """Current USAspending prime-contract award linked to a reviewed company entity."""
+
+    model_config = ConfigDict(frozen=True)
+
+    award_key: str = Field(min_length=1, max_length=300)
+    entity_id: str = Field(pattern=r"^[a-z0-9][a-z0-9_-]{2,79}$")
+    ticker: str = Field(pattern=r"^[A-Z][A-Z0-9.-]{0,9}$")
+    award_id: str = Field(min_length=1, max_length=200)
+    recipient_name: str = Field(min_length=1)
+    recipient_uei: str | None = Field(default=None, min_length=12, max_length=12)
+    recipient_id: str | None = Field(default=None, min_length=1)
+    match_method: ContractMatchMethod
+    award_type: str = Field(min_length=1)
+    description: str = ""
+    award_amount_usd: Decimal
+    total_outlays_usd: Decimal | None = None
+    base_obligation_date: date
+    start_date: date | None = None
+    end_date: date | None = None
+    source_modified_at: datetime | None = None
+    awarding_agency: str | None = None
+    awarding_sub_agency: str | None = None
+    funding_agency: str | None = None
+    funding_sub_agency: str | None = None
+    naics_code: str | None = Field(default=None, pattern=r"^\d{2,6}$")
+    naics_description: str | None = None
+    psc_code: str | None = Field(default=None, min_length=1, max_length=8)
+    psc_description: str | None = None
+    place_of_performance_country: str | None = None
+    place_of_performance_state: str | None = None
+    source_url: str = Field(pattern=r"^https://www\.usaspending\.gov/award/")
+    source: SourceName = SourceName.USA_SPENDING_CONTRACT_AWARDS
+    ingested_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+    @field_validator("award_amount_usd", "total_outlays_usd")
+    @classmethod
+    def contract_amounts_must_be_finite(cls, value: Decimal | None) -> Decimal | None:
+        if value is not None and not value.is_finite():
+            raise ValueError("contract award amounts must be finite")
+        return value
+
+    @field_validator("source_modified_at", "ingested_at")
+    @classmethod
+    def contract_timestamps_must_be_timezone_aware(
+        cls,
+        value: datetime | None,
+    ) -> datetime | None:
+        if value is not None and value.tzinfo is None:
+            raise ValueError("contract timestamps must be timezone-aware")
+        return value
+
+    @model_validator(mode="after")
+    def contract_dates_must_be_ordered(self) -> FederalContractAward:
+        if self.start_date is not None and self.end_date is not None:
+            if self.end_date < self.start_date:
+                raise ValueError("contract end_date must not precede start_date")
         return self
 
 

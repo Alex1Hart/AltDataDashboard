@@ -11,6 +11,7 @@ import duckdb
 import pandas as pd
 
 from portwatch.models import (
+    FederalContractAward,
     IngestionStatus,
     PortOperation,
     SecCompanyFact,
@@ -45,7 +46,9 @@ class DuckDBRepository:
                     commodity_code VARCHAR,
                     country_code VARCHAR,
                     entity_id VARCHAR,
-                    ticker VARCHAR
+                    ticker VARCHAR,
+                    period_end DATE,
+                    records_rejected INTEGER NOT NULL DEFAULT 0
                 );
 
                 CREATE TABLE IF NOT EXISTS raw_payloads (
@@ -241,6 +244,84 @@ class DuckDBRepository:
                     payload_sha256 VARCHAR NOT NULL,
                     revision_number INTEGER NOT NULL DEFAULT 1
                 );
+
+                CREATE TABLE IF NOT EXISTS federal_contract_awards (
+                    award_key VARCHAR NOT NULL,
+                    entity_id VARCHAR NOT NULL,
+                    ticker VARCHAR NOT NULL,
+                    award_id VARCHAR NOT NULL,
+                    recipient_name VARCHAR NOT NULL,
+                    recipient_uei VARCHAR,
+                    recipient_id VARCHAR,
+                    match_method VARCHAR NOT NULL,
+                    award_type VARCHAR NOT NULL,
+                    description VARCHAR NOT NULL,
+                    award_amount_usd DECIMAL(38, 2) NOT NULL,
+                    total_outlays_usd DECIMAL(38, 2),
+                    base_obligation_date DATE NOT NULL,
+                    start_date DATE,
+                    end_date DATE,
+                    source_modified_at TIMESTAMPTZ,
+                    awarding_agency VARCHAR,
+                    awarding_sub_agency VARCHAR,
+                    funding_agency VARCHAR,
+                    funding_sub_agency VARCHAR,
+                    naics_code VARCHAR,
+                    naics_description VARCHAR,
+                    psc_code VARCHAR,
+                    psc_description VARCHAR,
+                    place_of_performance_country VARCHAR,
+                    place_of_performance_state VARCHAR,
+                    source_url VARCHAR NOT NULL,
+                    source VARCHAR NOT NULL,
+                    ingested_at TIMESTAMPTZ NOT NULL,
+                    run_id VARCHAR NOT NULL,
+                    publication_at TIMESTAMPTZ NOT NULL,
+                    available_at TIMESTAMPTZ NOT NULL,
+                    revision_number INTEGER NOT NULL DEFAULT 1,
+                    payload_sha256 VARCHAR NOT NULL,
+                    PRIMARY KEY (award_key, source)
+                );
+
+                CREATE TABLE IF NOT EXISTS federal_contract_award_revisions (
+                    award_key VARCHAR NOT NULL,
+                    entity_id VARCHAR NOT NULL,
+                    ticker VARCHAR NOT NULL,
+                    award_id VARCHAR NOT NULL,
+                    recipient_name VARCHAR NOT NULL,
+                    recipient_uei VARCHAR,
+                    recipient_id VARCHAR,
+                    match_method VARCHAR NOT NULL,
+                    award_type VARCHAR NOT NULL,
+                    description VARCHAR NOT NULL,
+                    award_amount_usd DECIMAL(38, 2) NOT NULL,
+                    total_outlays_usd DECIMAL(38, 2),
+                    base_obligation_date DATE NOT NULL,
+                    start_date DATE,
+                    end_date DATE,
+                    source_modified_at TIMESTAMPTZ,
+                    awarding_agency VARCHAR,
+                    awarding_sub_agency VARCHAR,
+                    funding_agency VARCHAR,
+                    funding_sub_agency VARCHAR,
+                    naics_code VARCHAR,
+                    naics_description VARCHAR,
+                    psc_code VARCHAR,
+                    psc_description VARCHAR,
+                    place_of_performance_country VARCHAR,
+                    place_of_performance_state VARCHAR,
+                    source_url VARCHAR NOT NULL,
+                    source VARCHAR NOT NULL,
+                    ingested_at TIMESTAMPTZ NOT NULL,
+                    run_id VARCHAR NOT NULL,
+                    publication_at TIMESTAMPTZ NOT NULL,
+                    available_at TIMESTAMPTZ NOT NULL,
+                    revision_number INTEGER NOT NULL,
+                    payload_sha256 VARCHAR NOT NULL,
+                    valid_from TIMESTAMPTZ NOT NULL,
+                    valid_until TIMESTAMPTZ,
+                    PRIMARY KEY (award_key, source, revision_number)
+                );
                 """
             )
 
@@ -253,6 +334,9 @@ class DuckDBRepository:
                 ALTER TABLE ingestion_runs ADD COLUMN IF NOT EXISTS country_code VARCHAR;
                 ALTER TABLE ingestion_runs ADD COLUMN IF NOT EXISTS entity_id VARCHAR;
                 ALTER TABLE ingestion_runs ADD COLUMN IF NOT EXISTS ticker VARCHAR;
+                ALTER TABLE ingestion_runs ADD COLUMN IF NOT EXISTS period_end DATE;
+                ALTER TABLE ingestion_runs
+                    ADD COLUMN IF NOT EXISTS records_rejected INTEGER DEFAULT 0;
                 ALTER TABLE trade_flows ADD COLUMN IF NOT EXISTS publication_at TIMESTAMPTZ;
                 ALTER TABLE trade_flows ADD COLUMN IF NOT EXISTS available_at TIMESTAMPTZ;
                 ALTER TABLE trade_flows ADD COLUMN IF NOT EXISTS revision_number INTEGER DEFAULT 1;
@@ -288,6 +372,7 @@ class DuckDBRepository:
         country_code: str | None = None,
         entity_id: str | None = None,
         ticker: str | None = None,
+        period_end: date | None = None,
     ) -> None:
         with self._connect() as connection:
             connection.execute(
@@ -295,9 +380,9 @@ class DuckDBRepository:
                 INSERT INTO ingestion_runs (
                     run_id, source, status, started_at,
                     period_start, port_code, commodity_code, country_code,
-                    entity_id, ticker
+                    entity_id, ticker, period_end
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     run_id,
@@ -310,6 +395,7 @@ class DuckDBRepository:
                     country_code,
                     entity_id,
                     ticker,
+                    period_end,
                 ],
             )
 
@@ -320,6 +406,7 @@ class DuckDBRepository:
         status: IngestionStatus,
         records_received: int,
         records_written: int,
+        records_rejected: int = 0,
         error_message: str | None = None,
     ) -> datetime:
         completed_at = datetime.now(UTC)
@@ -328,7 +415,7 @@ class DuckDBRepository:
                 """
                 UPDATE ingestion_runs
                 SET status = ?, records_received = ?, records_written = ?,
-                    completed_at = ?, error_message = ?
+                    completed_at = ?, error_message = ?, records_rejected = ?
                 WHERE run_id = ?
                 """,
                 [
@@ -337,6 +424,7 @@ class DuckDBRepository:
                     records_written,
                     completed_at,
                     error_message,
+                    records_rejected,
                     run_id,
                 ],
             )
@@ -462,8 +550,7 @@ class DuckDBRepository:
                     [facts[0].entity_id],
                 ).fetchall()
                 existing_by_id = {
-                    str(existing_row[0]): tuple(existing_row[1:])
-                    for existing_row in existing_rows
+                    str(existing_row[0]): tuple(existing_row[1:]) for existing_row in existing_rows
                 }
 
             fact_changes = 0
@@ -594,6 +681,178 @@ class DuckDBRepository:
                 "SELECT COUNT(*) FROM sec_filings",
             )
         return (filing_count_after - filing_count_before) + fact_changes
+
+    def upsert_federal_contract_awards(
+        self,
+        run_id: str,
+        awards: list[FederalContractAward],
+        *,
+        payload_sha256_by_award: dict[str, str],
+    ) -> int:
+        """Atomically store current award snapshots and close superseded vintages."""
+        missing_hashes = {
+            award.award_key for award in awards if award.award_key not in payload_sha256_by_award
+        }
+        if missing_hashes:
+            raise ValueError(f"missing raw payload hashes for awards: {sorted(missing_hashes)}")
+
+        if not awards:
+            return 0
+
+        current_columns = (
+            "award_key",
+            "entity_id",
+            "ticker",
+            "award_id",
+            "recipient_name",
+            "recipient_uei",
+            "recipient_id",
+            "match_method",
+            "award_type",
+            "description",
+            "award_amount_usd",
+            "total_outlays_usd",
+            "base_obligation_date",
+            "start_date",
+            "end_date",
+            "source_modified_at",
+            "awarding_agency",
+            "awarding_sub_agency",
+            "funding_agency",
+            "funding_sub_agency",
+            "naics_code",
+            "naics_description",
+            "psc_code",
+            "psc_description",
+            "place_of_performance_country",
+            "place_of_performance_state",
+            "source_url",
+            "source",
+            "ingested_at",
+            "run_id",
+            "publication_at",
+            "available_at",
+            "revision_number",
+            "payload_sha256",
+        )
+        with self._connect() as connection, self._transaction(connection):
+            tickers = sorted({award.ticker for award in awards})
+            ticker_placeholders = ", ".join("?" for _ in tickers)
+            existing_rows = connection.execute(
+                f"""
+                SELECT award_key, source, revision_number, entity_id, ticker, award_id,
+                       recipient_name, recipient_uei, recipient_id, match_method,
+                       award_type, description, award_amount_usd, total_outlays_usd,
+                       base_obligation_date, start_date, end_date, source_modified_at,
+                       awarding_agency, awarding_sub_agency, funding_agency,
+                       funding_sub_agency, naics_code, naics_description, psc_code,
+                       psc_description, place_of_performance_country,
+                       place_of_performance_state, source_url
+                FROM federal_contract_awards
+                WHERE ticker IN ({ticker_placeholders})
+                """,
+                tickers,
+            ).fetchall()
+            existing_by_key = {
+                (str(existing[0]), str(existing[1])): tuple(existing[2:])
+                for existing in existing_rows
+            }
+            rows: list[tuple[Any, ...]] = []
+            revision_rows: list[tuple[Any, ...]] = []
+            revisions_to_close: list[tuple[datetime, str, str]] = []
+            for award in awards:
+                existing = existing_by_key.get((award.award_key, award.source.value))
+                candidate = (
+                    award.entity_id,
+                    award.ticker,
+                    award.award_id,
+                    award.recipient_name,
+                    award.recipient_uei,
+                    award.recipient_id,
+                    award.match_method.value,
+                    award.award_type,
+                    award.description,
+                    award.award_amount_usd,
+                    award.total_outlays_usd,
+                    award.base_obligation_date,
+                    award.start_date,
+                    award.end_date,
+                    award.source_modified_at,
+                    award.awarding_agency,
+                    award.awarding_sub_agency,
+                    award.funding_agency,
+                    award.funding_sub_agency,
+                    award.naics_code,
+                    award.naics_description,
+                    award.psc_code,
+                    award.psc_description,
+                    award.place_of_performance_country,
+                    award.place_of_performance_state,
+                    award.source_url,
+                )
+                if existing is not None and tuple(existing[1:]) == candidate:
+                    continue
+
+                revision_number = 1 if existing is None else int(existing[0]) + 1
+                if existing is not None:
+                    revisions_to_close.append(
+                        (award.ingested_at, award.award_key, award.source.value)
+                    )
+                publication_at = award.source_modified_at or award.ingested_at
+                row = (
+                    award.award_key,
+                    *candidate,
+                    award.source.value,
+                    award.ingested_at,
+                    run_id,
+                    publication_at,
+                    award.ingested_at,
+                    revision_number,
+                    payload_sha256_by_award[award.award_key],
+                )
+                rows.append(row)
+                revision_rows.append((*row, award.ingested_at, None))
+
+            if revisions_to_close:
+                closing_frame = pd.DataFrame.from_records(
+                    revisions_to_close,
+                    columns=("valid_until", "award_key", "source"),
+                )
+                connection.register("_contract_revisions_to_close", closing_frame)
+                try:
+                    connection.execute(
+                        """
+                        UPDATE federal_contract_award_revisions AS revisions
+                        SET valid_until = changes.valid_until
+                        FROM _contract_revisions_to_close AS changes
+                        WHERE revisions.award_key = changes.award_key
+                          AND revisions.source = changes.source
+                          AND revisions.valid_until IS NULL
+                        """
+                    )
+                finally:
+                    connection.unregister("_contract_revisions_to_close")
+            if rows:
+                current_frame = pd.DataFrame.from_records(rows, columns=current_columns)
+                revision_frame = pd.DataFrame.from_records(
+                    revision_rows,
+                    columns=(*current_columns, "valid_from", "valid_until"),
+                )
+                connection.register("_contract_award_batch", current_frame)
+                connection.register("_contract_award_revision_batch", revision_frame)
+                try:
+                    connection.execute(
+                        "INSERT OR REPLACE INTO federal_contract_awards "
+                        "SELECT * FROM _contract_award_batch"
+                    )
+                    connection.execute(
+                        "INSERT INTO federal_contract_award_revisions "
+                        "SELECT * FROM _contract_award_revision_batch"
+                    )
+                finally:
+                    connection.unregister("_contract_award_revision_batch")
+                    connection.unregister("_contract_award_batch")
+        return len(rows)
 
     def upsert_trade_flows(
         self,
@@ -974,6 +1233,48 @@ class DuckDBRepository:
                 [entity_id, taxonomy, tag, unit, limit],
             ).fetchdf()
 
+    def federal_contract_awards_summary(
+        self,
+        *,
+        ticker: str | None = None,
+    ) -> pd.DataFrame:
+        where_clause = "" if ticker is None else "WHERE ticker = ?"
+        parameters: list[Any] = [] if ticker is None else [ticker.upper()]
+        with self._connect() as connection:
+            return connection.execute(
+                f"""
+                SELECT award_key, entity_id, ticker, award_id, recipient_name,
+                       recipient_uei, recipient_id, match_method, award_type, description,
+                       CAST(award_amount_usd AS DOUBLE) AS award_amount_usd,
+                       CAST(total_outlays_usd AS DOUBLE) AS total_outlays_usd,
+                       base_obligation_date, start_date, end_date, source_modified_at,
+                       awarding_agency, awarding_sub_agency, funding_agency,
+                       funding_sub_agency, naics_code, naics_description, psc_code,
+                       psc_description, place_of_performance_country,
+                       place_of_performance_state, source_url, publication_at,
+                       available_at, revision_number, payload_sha256
+                FROM federal_contract_awards
+                {where_clause}
+                ORDER BY base_obligation_date DESC, award_amount_usd DESC
+                """,
+                parameters,
+            ).fetchdf()
+
+    def federal_contract_award_revisions(self, limit: int = 100) -> pd.DataFrame:
+        with self._connect() as connection:
+            return connection.execute(
+                """
+                SELECT award_key, entity_id, ticker, award_id, recipient_name,
+                       CAST(award_amount_usd AS DOUBLE) AS award_amount_usd,
+                       source_modified_at, revision_number, publication_at, available_at,
+                       valid_from, valid_until, payload_sha256
+                FROM federal_contract_award_revisions
+                ORDER BY valid_from DESC
+                LIMIT ?
+                """,
+                [limit],
+            ).fetchdf()
+
     def source_counts(self) -> dict[str, int]:
         """Return full-table record counts for dashboard coverage indicators."""
         with self._connect() as connection:
@@ -984,7 +1285,9 @@ class DuckDBRepository:
                     (SELECT COUNT(*) FROM port_operations),
                     (SELECT COUNT(*) FROM sec_filings),
                     (SELECT COUNT(*) FROM sec_company_facts),
-                    (SELECT COUNT(DISTINCT tag) FROM sec_company_facts)
+                    (SELECT COUNT(DISTINCT tag) FROM sec_company_facts),
+                    (SELECT COUNT(*) FROM federal_contract_awards),
+                    (SELECT COUNT(DISTINCT ticker) FROM federal_contract_awards)
                 """
             ).fetchone()
         if row is None:
@@ -995,6 +1298,8 @@ class DuckDBRepository:
             "sec_filings",
             "sec_company_facts",
             "sec_company_concepts",
+            "federal_contract_awards",
+            "contract_companies",
         )
         return {name: int(value) for name, value in zip(names, row, strict=True)}
 

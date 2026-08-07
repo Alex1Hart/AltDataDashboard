@@ -7,9 +7,10 @@ ports, commodities, countries, and operating metrics provide contextual evidence
 not infer importer ownership from aggregate cargo. A company conclusion requires a reviewed entity
 relationship and at least one company-specific or company-linked observation.
 
-The v0.3 foundation implements resumable port/trade ingestion, source revision history,
-deterministic contextual signals, a reviewed entity graph, and registry-resolved SEC submissions
-and Company Facts ingestion. The next milestone adds deterministic company signals and
+The v0.4 foundation implements resumable port/trade ingestion, source revision history,
+deterministic contextual signals, a reviewed entity graph, registry-resolved SEC submissions and
+Company Facts ingestion, and entity-resolved federal prime-contract awards. The next milestone adds
+cross-source deterministic company signals and
 evidence-gated company insight cards. LLM-generated briefs remain downstream of these validated
 layers.
 
@@ -23,6 +24,7 @@ layers.
 | Repository | Persist raw payloads, observations, and run metadata | Contain source-specific parsing |
 | Service | Orchestrate source → validate → archive → upsert | Embed dashboard logic |
 | Entity registry | Resolve issuers, subsidiaries, facilities, and source identifiers | Treat fuzzy matches as confirmed entities |
+| ContractWatch | Search USAspending and resolve award recipients to reviewed legal entities | Treat search results, obligations, or award ceilings as company revenue/backlog |
 | Evidence engine | Join dated company evidence with contextual signals | Promote inferred evidence to observed evidence |
 | Insight card | Present a falsifiable company claim, evidence, counterevidence, and confidence | Hide missing or stale inputs |
 | Dashboard | Query and display validated observations | Call upstream sources directly |
@@ -40,6 +42,12 @@ table and a complete revision-history table. SEC accessions are inserted idempot
 Facts source corrections create atomic revisions. Every write references an ingestion run and
 preserves when the value became available to the pipeline.
 
+ContractWatch archives each POST request and exact response page. `federal_contract_awards`
+contains the latest matched prime-award snapshot and `federal_contract_award_revisions` closes the
+prior vintage inside the same DuckDB transaction. Searches use direct contract award-type codes
+(`A` through `D`); indefinite-delivery vehicles and subawards are excluded from the first version
+because their amounts have different economic meanings.
+
 ## Failure policy
 
 - Missing credentials fail before a network request.
@@ -47,6 +55,8 @@ preserves when the value became available to the pipeline.
 - Timeouts and network errors receive bounded exponential-backoff retries.
 - HTTP errors are not blindly retried; the run is recorded as failed.
 - Schema drift and semantic violations fail the batch.
+- USAspending pagination fails closed if the configured page ceiling would truncate a result set.
+- Recipient search results are accepted only after deterministic reviewed-entity resolution.
 - A failed batch never writes normalized observations.
 - Error messages are retained in the ingestion audit table.
 

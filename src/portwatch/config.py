@@ -49,6 +49,23 @@ class Settings(BaseSettings):
         le=20,
         alias="PORTWATCH_SEC_FACT_HISTORY_YEARS",
     )
+    usaspending_request_interval_seconds: float = Field(
+        default=0.25,
+        ge=0,
+        alias="PORTWATCH_USASPENDING_REQUEST_INTERVAL_SECONDS",
+    )
+    usaspending_page_size: int = Field(
+        default=100,
+        ge=1,
+        le=100,
+        alias="PORTWATCH_USASPENDING_PAGE_SIZE",
+    )
+    usaspending_max_pages_per_search: int = Field(
+        default=100,
+        ge=1,
+        le=1_000,
+        alias="PORTWATCH_USASPENDING_MAX_PAGES_PER_SEARCH",
+    )
     log_level: str = Field(default="INFO", alias="PORTWATCH_LOG_LEVEL")
 
 

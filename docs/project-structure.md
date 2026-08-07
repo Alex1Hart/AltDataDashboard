@@ -15,18 +15,21 @@ FinanceTools/
 │   └── project-structure.md           # This file
 ├── src/portwatch/
 │   ├── analytics/
+│   │   ├── contracts.py              # Award momentum, agency HHI, expiration wall
 │   │   └── signals.py                # YoY, momentum, z-score, HHI, unit value
 │   ├── dashboard/
 │   │   └── app.py                    # Read-only Streamlit research interface
 │   ├── ingestion/
 │   │   ├── census.py                 # Census port/HS API adapter
 │   │   ├── port_of_la.py             # Port of LA public HTML adapter
-│   │   └── sec.py                    # SEC submissions and Company Facts adapter
+│   │   ├── sec.py                    # SEC submissions and Company Facts adapter
+│   │   └── usaspending.py            # Federal prime-award search and entity resolution
 │   ├── storage/
 │   │   └── duckdb.py                 # Current tables, vintages, audit history
 │   ├── backfill.py                   # Resumable Cartesian backfill orchestration
 │   ├── cli.py                        # Operator commands
 │   ├── config.py                     # Environment/secrets configuration
+│   ├── contract_service.py            # Atomic ContractWatch orchestration
 │   ├── models.py                     # Validated domain and exposure models
 │   ├── port_service.py               # Port-operation ingestion transaction
 │   ├── project_config.py             # Versioned YAML project configuration
@@ -80,6 +83,9 @@ portwatch ingest port-la
 
 # Ingest company-specific SEC evidence through the reviewed CIK mapping
 portwatch ingest sec --ticker CAT
+
+# Ingest company-linked federal prime awards; dates default to trailing three years
+portwatch ingest contracts --ticker CAT --start 2024-10-01 --end 2026-08-07
 
 # Launch research dashboard
 portwatch dashboard

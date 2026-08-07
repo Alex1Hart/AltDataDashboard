@@ -141,3 +141,36 @@ timestamp. Older facts use the filing date at midnight UTC and set `acceptance_i
 Point-in-time research must use `accepted_at`/`publication_at` and retain that estimation flag.
 The original decimal value is stored as text to avoid precision loss; dashboard queries may derive
 a floating-point value for display.
+
+## Federal prime contract awards
+
+`federal_contract_awards` stores the latest USAspending snapshot at:
+
+```text
+generated_internal_id × source
+```
+
+Each award records its matched registry entity, ticker, recipient name and identifiers, match
+method, PIID, agencies, NAICS/PSC, place of performance, dates, current obligation amount,
+outlays, source URL, availability timestamp, and raw response hash. Attribution is deterministic:
+UEI first, then a reviewed USAspending recipient ID, then an exact punctuation-insensitive match to
+a reviewed entity name or alias active on the award's base obligation date. Unresolved fuzzy-search
+results remain in the raw archive and are counted as rejected; they do not enter the award table.
+
+`federal_contract_award_revisions` retains every distinct snapshot and uses `valid_from` and
+`valid_until` for point-in-time analysis. A changed award and its new revision are written in one
+transaction.
+
+ContractWatch signals are intentionally narrow:
+
+| Signal | Meaning |
+|---|---|
+| `total_current_obligations_usd` | Sum of current cumulative award obligations |
+| `ttm_new_award_obligations_usd` | Current award value for awards whose base obligation date falls in the trailing year |
+| `ttm_new_award_yoy` | TTM new-award value versus the preceding twelve months |
+| `agency_hhi` | Concentration of positive current obligations by awarding agency |
+| `next_12m_expiring_award_value_usd` | Current value of awards whose performance period ends in the next year |
+
+None of these fields is company revenue, funded backlog, a contract ceiling, or remaining value.
+The award-level adapter does not allocate later modifications back to their action dates; a future
+transaction adapter is required for true obligation-flow analysis.

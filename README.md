@@ -8,9 +8,10 @@ events from contextual cargo movements and inferred public-company exposure.
 > **Primary objective:** discover differentiated, micro/company-level changes that can update an
 > investment thesis. Port and trade aggregates are supporting evidence, not the final product.
 
-> **Project status:** v0.3 company-evidence foundation. The vintage-aware port/trade pipeline,
-> dated entity graph, SEC submissions and Company Facts ingestion, and inferred exposure layer are
-> implemented. Evidence-gated company insight cards are the next product milestone.
+> **Project status:** v0.4 company-evidence foundation. The vintage-aware port/trade pipeline,
+> dated entity graph, SEC submissions and Company Facts ingestion, ContractWatch federal-award
+> pipeline, and inferred exposure layer are implemented. Evidence-gated company insight cards are
+> the next product milestone.
 
 ## Why this exists
 
@@ -111,6 +112,20 @@ The adapter archives each complete SEC response for reproducibility and normaliz
 recent five filing years by default to keep local research runs fast and memory-bounded. Adjust
 `PORTWATCH_SEC_FACT_HISTORY_YEARS` in `.env` when a longer analytical history is required.
 
+Ingest company-linked federal prime contract awards from the public
+[USAspending API](https://api.usaspending.gov/docs/intro-tutorial):
+
+```bash
+# Dates are optional; the default is a trailing three-year window ending today.
+portwatch ingest contracts --ticker CAT --start 2024-10-01 --end 2026-08-07
+```
+
+ContractWatch requires no API key. It searches each active legal entity in the reviewed company
+graph, then accepts an attribution only through a matching UEI, USAspending recipient ID, or exact
+normalized reviewed name. Fuzzy-search candidates that do not resolve are rejected and counted in
+the ingestion audit. `Award Amount` is current cumulative federal obligations—not revenue,
+remaining backlog, or a contract ceiling. The dashboard labels these semantics explicitly.
+
 Schedule D port codes used in the initial scope:
 
 | Port | Code |
@@ -143,7 +158,8 @@ require credentials.
 - [x] Dated company/subsidiary/facility entity graph with reviewed identifiers
 - [ ] Source-specific automated entity matching with analyst approval
 - [x] Company-specific SEC filing and structured-fact adapter
-- [ ] Company-level federal award adapter for relevant Industrials issuers
+- [x] Company-level federal prime-award adapter for reviewed Industrials issuers
+- [x] Contract obligation momentum, agency concentration, and expiration-wall dashboard
 - [ ] Facility event adapters for OSHA and EPA public records
 - [ ] Evidence-gated company insight cards with confidence and counterevidence
 - [ ] Daily dwell, vessel, rail, and blank-sailing adapters

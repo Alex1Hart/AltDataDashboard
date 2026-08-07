@@ -141,8 +141,7 @@ class SecEdgarClient:
             progress_fn=self.progress_fn,
         )
         self.progress_fn(
-            f"SEC 4/4: normalized {len(facts):,} facts filed since "
-            f"{filed_on_or_after.isoformat()}"
+            f"SEC 4/4: normalized {len(facts):,} facts filed since {filed_on_or_after.isoformat()}"
         )
         return SecEdgarBatch(
             entity_id=expected_entity_id,
