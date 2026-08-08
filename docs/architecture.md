@@ -7,9 +7,11 @@ ports, commodities, countries, and operating metrics provide contextual evidence
 not infer importer ownership from aggregate cargo. A company conclusion requires a reviewed entity
 relationship and at least one company-specific or company-linked observation.
 
-The v0.4 foundation implements resumable port/trade ingestion, source revision history,
+The v0.5 foundation implements resumable port/trade ingestion, source revision history,
 deterministic contextual signals, a reviewed entity graph, registry-resolved SEC submissions and
-Company Facts ingestion, and entity-resolved federal prime-contract awards. The next milestone adds
+Company Facts ingestion, entity-resolved federal prime-contract awards and signed actions, and a
+config-driven
+company-career posting lifecycle with Census QWI labor benchmarks. The next milestone adds
 cross-source deterministic company signals and
 evidence-gated company insight cards. LLM-generated briefs remain downstream of these validated
 layers.
@@ -24,10 +26,11 @@ layers.
 | Repository | Persist raw payloads, observations, and run metadata | Contain source-specific parsing |
 | Service | Orchestrate source → validate → archive → upsert | Embed dashboard logic |
 | Entity registry | Resolve issuers, subsidiaries, facilities, and source identifiers | Treat fuzzy matches as confirmed entities |
-| ContractWatch | Search USAspending and resolve award recipients to reviewed legal entities | Treat search results, obligations, or award ceilings as company revenue/backlog |
+| ContractWatch | Search USAspending, resolve recipients, and collect signed award actions | Treat search results, obligations, or award ceilings as company revenue/backlog |
+| HiringWatch | Collect complete first-party career snapshots, classify demand, and derive lifecycle events | Treat postings as completed hires or silently infer closures from partial crawls |
 | Evidence engine | Join dated company evidence with contextual signals | Promote inferred evidence to observed evidence |
 | Insight card | Present a falsifiable company claim, evidence, counterevidence, and confidence | Hide missing or stale inputs |
-| Dashboard | Query and display validated observations | Call upstream sources directly |
+| Dashboard | Query and display validated observations through named data bundles and focused page renderers | Call upstream sources directly or contain ingestion logic |
 
 ## Storage choice
 
@@ -44,9 +47,11 @@ preserves when the value became available to the pipeline.
 
 ContractWatch archives each POST request and exact response page. `federal_contract_awards`
 contains the latest matched prime-award snapshot and `federal_contract_award_revisions` closes the
-prior vintage inside the same DuckDB transaction. Searches use direct contract award-type codes
-(`A` through `D`); indefinite-delivery vehicles and subawards are excluded from the first version
-because their amounts have different economic meanings.
+prior vintage inside the same DuckDB transaction. `federal_contract_transactions` preserves each
+dated signed funding action, while `federal_contract_transaction_revisions` retains source
+corrections. Award and transaction changes commit atomically. Searches use direct contract
+award-type codes (`A` through `D`); indefinite-delivery vehicles and subawards are excluded from
+the first version because their amounts have different economic meanings.
 
 ## Failure policy
 
@@ -56,6 +61,8 @@ because their amounts have different economic meanings.
 - HTTP errors are not blindly retried; the run is recorded as failed.
 - Schema drift and semantic violations fail the batch.
 - USAspending pagination fails closed if the configured page ceiling would truncate a result set.
+- Career pagination fails closed on empty, inconsistent, or over-limit result sets; only complete snapshots can advance lifecycle state.
+- A posting closes only after the configured number of consecutive complete snapshots in which it is absent.
 - Recipient search results are accepted only after deterministic reviewed-entity resolution.
 - A failed batch never writes normalized observations.
 - Error messages are retained in the ingestion audit table.

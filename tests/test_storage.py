@@ -58,6 +58,59 @@ def test_repository_upserts_idempotently(tmp_path: Path) -> None:
     )
 
 
+def test_raw_payload_batch_preserves_each_source_url(tmp_path: Path) -> None:
+    repository = DuckDBRepository(tmp_path / "raw-provenance.duckdb")
+    repository.initialize()
+
+    payload_hashes = repository.store_raw_payload_batch(
+        "run-1",
+        SourceName.COMPANY_CAREERS,
+        [
+            (b"same body", "career_detail:test", "https://example.com/jobs/1"),
+            (b"same body", "career_detail:test", "https://example.com/jobs/2"),
+        ],
+    )
+
+    assert payload_hashes[0] == payload_hashes[1]
+    assert repository.execute_scalar("SELECT COUNT(*) FROM raw_payloads") == 1
+    assert repository.execute_scalar("SELECT COUNT(*) FROM raw_payload_links") == 2
+
+
+def test_initialize_migrates_legacy_raw_payload_links(tmp_path: Path) -> None:
+    database_path = tmp_path / "legacy-raw-links.duckdb"
+    with duckdb.connect(str(database_path)) as connection:
+        connection.execute(
+            """
+            CREATE TABLE raw_payload_links (
+                run_id VARCHAR NOT NULL,
+                payload_sha256 VARCHAR NOT NULL,
+                resource_type VARCHAR NOT NULL,
+                source_url VARCHAR,
+                retrieved_at TIMESTAMPTZ NOT NULL,
+                PRIMARY KEY (run_id, payload_sha256, resource_type)
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO raw_payload_links VALUES (
+                'legacy-run', 'legacy-hash', 'career_detail:test',
+                'https://example.com/jobs/1', CURRENT_TIMESTAMP
+            )
+            """
+        )
+
+    repository = DuckDBRepository(database_path)
+    repository.initialize()
+
+    assert (
+        repository.execute_scalar(
+            "SELECT source_url_key FROM raw_payload_links WHERE run_id = 'legacy-run'"
+        )
+        == "https://example.com/jobs/1"
+    )
+
+
 def test_successful_trade_slice_matches_country_scope_exactly(tmp_path: Path) -> None:
     payload = FIXTURE_PATH.read_bytes()
     flow = parse_census_payload(json.loads(payload), requested_port_code="2704")[0]

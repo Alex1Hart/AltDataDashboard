@@ -1,0 +1,117 @@
+version: 2
+missing_snapshots_before_close: 2
+
+# Each source is a public, first-party company career site. Greenhouse and Lever
+# use their documented public APIs; html_paginated makes an issuer career site
+# configurable without embedding company-specific selectors in Python.
+sources:
+  - source_id: cat_careers
+    ticker: CAT
+    entity_id: cat_inc
+    source_type: html_paginated
+    base_url: https://careers.caterpillar.com/en/jobs/
+    enabled: true
+    page_parameter: page
+    first_page: 1
+    max_pages: 100
+    job_selector: .card.card-job
+    job_id_attribute: data-id
+    title_selector: .card-title a.js-view-job
+    link_selector: .card-title a.js-view-job
+    location_selector: ul.job-meta li:first-child
+    last_page_selector: .pagination a[rel~='last']
+    location_delimiter: " / "
+    detail_json_ld: true
+    detail_fetch_limit_per_run: 50
+    detail_cache_ttl_days: 30
+
+companies:
+  - ticker: CAT
+    business_lines:
+      - rule_id: cat_construction_industries
+        name: Construction Industries
+        valid_from: 2025-01-01
+        evidence_url: https://www.sec.gov/Archives/edgar/data/18230/000001823026000008/cat-20251231.htm
+        naics_codes: ["333120", "333131"]
+        keywords:
+          - construction industries
+          - building construction products
+          - earthmoving division
+          - excavation division
+          - paving products
+      - rule_id: cat_resource_industries
+        name: Resource Industries
+        valid_from: 2025-01-01
+        evidence_url: https://www.sec.gov/Archives/edgar/data/18230/000001823026000008/cat-20251231.htm
+        naics_codes: ["333131", "333132"]
+        keywords:
+          - resource industries
+          - minestar
+          - large mining trucks
+          - surface mining
+          - underground mining
+      - rule_id: cat_energy_transportation
+        name: Energy & Transportation
+        valid_from: 2025-01-01
+        evidence_url: https://www.sec.gov/Archives/edgar/data/18230/000001823026000008/cat-20251231.htm
+        naics_codes: ["333618", "333611", "336510"]
+        keywords:
+          - energy and transportation
+          - oil & gas and marine
+          - oil and gas and marine
+          - electric power division
+          - large power systems division
+          - industrial power systems division
+          - solar turbines
+          - progress rail
+      - rule_id: cat_financial_products
+        name: Financial Products
+        valid_from: 2025-01-01
+        evidence_url: https://www.sec.gov/Archives/edgar/data/18230/000001823026000008/cat-20251231.htm
+        keywords:
+          - cat financial
+          - caterpillar financial
+          - financial products division
+
+    functions:
+      - rule_id: function_engineering
+        name: Engineering & R&D
+        keywords: [engineer, engineering, research, development, design, simulation]
+      - rule_id: function_manufacturing
+        name: Manufacturing & Operations
+        keywords: [manufacturing, machinist, assembly, production, operations, welder]
+      - rule_id: function_technology
+        name: Technology, Data & Software
+        keywords: [software, data, analytics, digital, cybersecurity, cloud, ai, machine learning]
+      - rule_id: function_supply_chain
+        name: Supply Chain & Procurement
+        keywords: [supply chain, procurement, purchasing, logistics, material planning]
+      - rule_id: function_sales_support
+        name: Sales, Marketing & Product Support
+        keywords: [sales, marketing, dealer, product support, aftermarket, customer service]
+      - rule_id: function_finance
+        name: Finance
+        keywords: [finance, financial, accounting, treasury, audit, tax]
+      - rule_id: function_people_legal
+        name: People, Legal & Corporate
+        keywords: [human resources, recruiter, talent, legal, counsel, compliance, communications]
+      - rule_id: function_safety_quality
+        name: Safety & Quality
+        keywords: [safety, quality, environmental, ehs, lean, six sigma]
+
+    themes:
+      - rule_id: theme_electrification
+        name: Electrification
+        keywords: [electrification, battery, electric powertrain, charging, fuel cell]
+      - rule_id: theme_autonomy
+        name: Autonomy & Robotics
+        keywords: [autonomous, autonomy, robotics, perception, computer vision]
+      - rule_id: theme_digital
+        name: Digital, Data & AI
+        keywords: [digital, software, data, analytics, artificial intelligence, machine learning, ai]
+      - rule_id: theme_decarbonization
+        name: Decarbonization
+        keywords: [decarbonization, low carbon, hydrogen, emissions, sustainability]
+      - rule_id: theme_aftermarket
+        name: Aftermarket & Services
+        keywords: [aftermarket, parts, dealer, field service, product support, remanufacturing]

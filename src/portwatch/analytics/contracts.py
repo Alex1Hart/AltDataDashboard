@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+from typing import Literal
 
 import pandas as pd
 
@@ -8,7 +9,15 @@ CONTRACT_SIGNAL_COLUMNS = [
     "ticker",
     "as_of_date",
     "award_count",
+    "transaction_count",
+    "transaction_coverage",
     "total_current_obligations_usd",
+    "ttm_net_obligations_usd",
+    "prior_ttm_net_obligations_usd",
+    "ttm_net_obligations_yoy",
+    "ttm_gross_obligations_usd",
+    "ttm_deobligations_usd",
+    "ttm_modification_count",
     "ttm_new_award_obligations_usd",
     "prior_ttm_new_award_obligations_usd",
     "ttm_new_award_yoy",
@@ -16,12 +25,14 @@ CONTRACT_SIGNAL_COLUMNS = [
     "next_12m_expiring_award_value_usd",
     "agency_hhi",
     "top_awarding_agency",
+    "latest_action_date",
     "latest_source_modified_at",
 ]
 
 
 def compute_contract_company_signals(
     awards: pd.DataFrame,
+    transactions: pd.DataFrame | None = None,
     *,
     as_of: date | None = None,
 ) -> pd.DataFrame:
@@ -40,9 +51,27 @@ def compute_contract_company_signals(
     working["award_amount_usd"] = pd.to_numeric(
         working["award_amount_usd"], errors="coerce"
     ).fillna(0.0)
+    transaction_frame = _normalize_transactions(transactions)
 
     rows: list[dict[str, object]] = []
     for ticker, company_awards in working.groupby("ticker", sort=True):
+        company_transactions = transaction_frame[transaction_frame["ticker"] == ticker]
+        transaction_dates = company_transactions["action_date"]
+        current_transactions = company_transactions[
+            transaction_dates.between(current_window_start, analysis_date, inclusive="both")
+        ]
+        prior_transactions = company_transactions[
+            transaction_dates.between(
+                prior_window_start,
+                current_window_start,
+                inclusive="left",
+            )
+        ]
+        current_obligations = current_transactions["federal_action_obligation_usd"]
+        prior_net_obligations = float(prior_transactions["federal_action_obligation_usd"].sum())
+        current_net_obligations = float(current_obligations.sum())
+        covered_awards = int(company_transactions["award_key"].nunique())
+        award_count = int(company_awards["award_key"].nunique())
         base_dates = company_awards["base_obligation_date"]
         current_ttm = company_awards[
             base_dates.between(current_window_start, analysis_date, inclusive="both")
@@ -77,8 +106,22 @@ def compute_contract_company_signals(
             {
                 "ticker": str(ticker),
                 "as_of_date": analysis_date.date(),
-                "award_count": int(company_awards["award_key"].nunique()),
+                "award_count": award_count,
+                "transaction_count": len(company_transactions),
+                "transaction_coverage": covered_awards / award_count if award_count else 0.0,
                 "total_current_obligations_usd": float(company_awards["award_amount_usd"].sum()),
+                "ttm_net_obligations_usd": current_net_obligations,
+                "prior_ttm_net_obligations_usd": prior_net_obligations,
+                "ttm_net_obligations_yoy": (
+                    current_net_obligations / prior_net_obligations - 1
+                    if prior_net_obligations > 0
+                    else float("nan")
+                ),
+                "ttm_gross_obligations_usd": float(current_obligations.clip(lower=0).sum()),
+                "ttm_deobligations_usd": float(-current_obligations.clip(upper=0).sum()),
+                "ttm_modification_count": int(
+                    (~current_transactions["modification_number"].isin(["", "0"])).sum()
+                ),
                 "ttm_new_award_obligations_usd": current_amount,
                 "prior_ttm_new_award_obligations_usd": prior_amount,
                 "ttm_new_award_yoy": (
@@ -88,6 +131,7 @@ def compute_contract_company_signals(
                 "next_12m_expiring_award_value_usd": float(expiring["award_amount_usd"].sum()),
                 "agency_hhi": agency_hhi,
                 "top_awarding_agency": top_agency,
+                "latest_action_date": company_transactions["action_date"].max(),
                 "latest_source_modified_at": company_awards["source_modified_at"].max(),
             }
         )
@@ -115,3 +159,129 @@ def monthly_contract_awards(awards: pd.DataFrame) -> pd.DataFrame:
         )
         .sort_values(["ticker", "award_month"])
     )
+
+
+def monthly_contract_transactions(transactions: pd.DataFrame) -> pd.DataFrame:
+    """Aggregate signed obligations and deobligations by action month."""
+    columns = [
+        "ticker",
+        "action_month",
+        "net_obligations_usd",
+        "gross_obligations_usd",
+        "deobligations_usd",
+        "transaction_count",
+    ]
+    working = _normalize_transactions(transactions)
+    if working.empty:
+        return pd.DataFrame(columns=columns)
+    working = working.dropna(subset=["action_date"])
+    working["action_month"] = working["action_date"].dt.to_period("M").dt.to_timestamp()
+    working["gross_obligations_usd"] = working["federal_action_obligation_usd"].clip(lower=0)
+    working["deobligations_usd"] = -working["federal_action_obligation_usd"].clip(upper=0)
+    return (
+        working.groupby(["ticker", "action_month"], as_index=False)
+        .agg(
+            net_obligations_usd=("federal_action_obligation_usd", "sum"),
+            gross_obligations_usd=("gross_obligations_usd", "sum"),
+            deobligations_usd=("deobligations_usd", "sum"),
+            transaction_count=("transaction_id", "nunique"),
+        )
+        .sort_values(["ticker", "action_month"])
+    )
+
+
+def contract_award_detail(
+    awards: pd.DataFrame,
+    transactions: pd.DataFrame,
+) -> pd.DataFrame:
+    """Attach signed transaction history to current award inventory without mixing grains."""
+    if awards.empty:
+        return awards.copy()
+    details = awards.copy()
+    working = _normalize_transactions(transactions)
+    if working.empty:
+        return details.assign(
+            transaction_count=0,
+            transaction_net_obligations_usd=0.0,
+            transaction_gross_obligations_usd=0.0,
+            transaction_deobligations_usd=0.0,
+            latest_action_date=pd.NaT,
+            latest_modification_number=None,
+        )
+    working["positive_obligation"] = working["federal_action_obligation_usd"].clip(lower=0)
+    working["deobligation"] = -working["federal_action_obligation_usd"].clip(upper=0)
+    aggregates = working.groupby("award_key", as_index=False).agg(
+        transaction_count=("transaction_id", "nunique"),
+        transaction_net_obligations_usd=("federal_action_obligation_usd", "sum"),
+        transaction_gross_obligations_usd=("positive_obligation", "sum"),
+        transaction_deobligations_usd=("deobligation", "sum"),
+        latest_action_date=("action_date", "max"),
+    )
+    latest_modifications = (
+        working.sort_values(["action_date", "transaction_id"])
+        .drop_duplicates("award_key", keep="last")[["award_key", "modification_number"]]
+        .rename(columns={"modification_number": "latest_modification_number"})
+    )
+    return details.merge(aggregates, on="award_key", how="left").merge(
+        latest_modifications,
+        on="award_key",
+        how="left",
+    )
+
+
+def contract_obligation_breakdown(
+    awards: pd.DataFrame,
+    transactions: pd.DataFrame,
+    *,
+    dimension: Literal["awarding_agency", "naics_code", "psc_code"],
+) -> pd.DataFrame:
+    """Attribute signed transaction flows to one stable parent-award dimension."""
+    columns = [
+        dimension,
+        "net_obligations_usd",
+        "gross_obligations_usd",
+        "deobligations_usd",
+        "transaction_count",
+    ]
+    if awards.empty or transactions.empty:
+        return pd.DataFrame(columns=columns)
+    award_dimensions = awards[["award_key", dimension]].drop_duplicates("award_key")
+    working = _normalize_transactions(transactions).merge(
+        award_dimensions,
+        on="award_key",
+        how="left",
+    )
+    working = working.dropna(subset=[dimension])
+    working["gross_obligations_usd"] = working["federal_action_obligation_usd"].clip(lower=0)
+    working["deobligations_usd"] = -working["federal_action_obligation_usd"].clip(upper=0)
+    return (
+        working.groupby(dimension, as_index=False)
+        .agg(
+            net_obligations_usd=("federal_action_obligation_usd", "sum"),
+            gross_obligations_usd=("gross_obligations_usd", "sum"),
+            deobligations_usd=("deobligations_usd", "sum"),
+            transaction_count=("transaction_id", "nunique"),
+        )
+        .sort_values("gross_obligations_usd", ascending=False)
+    )
+
+
+def _normalize_transactions(transactions: pd.DataFrame | None) -> pd.DataFrame:
+    columns = [
+        "transaction_id",
+        "award_key",
+        "ticker",
+        "action_date",
+        "federal_action_obligation_usd",
+        "modification_number",
+    ]
+    if transactions is None or transactions.empty:
+        return pd.DataFrame(columns=columns)
+    working = transactions.copy()
+    working["action_date"] = pd.to_datetime(working["action_date"], errors="coerce")
+    working["federal_action_obligation_usd"] = pd.to_numeric(
+        working["federal_action_obligation_usd"],
+        errors="coerce",
+    ).fillna(0.0)
+    working["modification_number"] = working["modification_number"].fillna("").astype(str)
+    return working

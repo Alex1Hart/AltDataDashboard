@@ -12,6 +12,9 @@ class SourceName(StrEnum):
     PORT_OF_LA_CONTAINER_STATS = "port_of_la_container_stats"
     SEC_EDGAR = "sec_edgar"
     USA_SPENDING_CONTRACT_AWARDS = "usaspending_contract_awards"
+    USA_SPENDING_CONTRACT_TRANSACTIONS = "usaspending_contract_transactions"
+    COMPANY_CAREERS = "company_careers"
+    CENSUS_QWI = "census_qwi"
 
 
 class IngestionStatus(StrEnum):
@@ -60,6 +63,36 @@ class ContractMatchMethod(StrEnum):
     UEI = "uei"
     RECIPIENT_ID = "recipient_id"
     REVIEWED_NAME = "reviewed_name"
+
+
+class JobStatus(StrEnum):
+    ACTIVE = "active"
+    CLOSED = "closed"
+
+
+class JobEventType(StrEnum):
+    BASELINE = "baseline"
+    OPENED = "opened"
+    UPDATED = "updated"
+    CLOSED = "closed"
+    REOPENED = "reopened"
+
+
+class JobClassificationMethod(StrEnum):
+    DETERMINISTIC_RULE = "deterministic_rule"
+    UNCLASSIFIED = "unclassified"
+    ANALYST_REVIEWED = "analyst_reviewed"
+
+
+class LaborMetricName(StrEnum):
+    EMPLOYMENT = "employment"
+    ENDING_EMPLOYMENT = "ending_employment"
+    HIRES = "hires"
+    SEPARATIONS = "separations"
+    JOB_GAINS = "job_gains"
+    JOB_LOSSES = "job_losses"
+    STABLE_JOBS_EARNINGS = "stable_jobs_earnings"
+    PAYROLL = "payroll"
 
 
 class EntityRelationshipType(StrEnum):
@@ -268,6 +301,43 @@ class FederalContractAward(BaseModel):
             if self.end_date < self.start_date:
                 raise ValueError("contract end_date must not precede start_date")
         return self
+
+
+class FederalContractTransaction(BaseModel):
+    """Signed USAspending action on a reviewed company's prime contract award."""
+
+    model_config = ConfigDict(frozen=True)
+
+    transaction_id: str = Field(min_length=1, max_length=300)
+    award_key: str = Field(min_length=1, max_length=300)
+    entity_id: str = Field(pattern=r"^[a-z0-9][a-z0-9_-]{2,79}$")
+    ticker: str = Field(pattern=r"^[A-Z][A-Z0-9.-]{0,9}$")
+    award_id: str = Field(min_length=1, max_length=200)
+    action_date: date
+    federal_action_obligation_usd: Decimal
+    action_type: str | None = None
+    action_type_description: str | None = None
+    modification_number: str = Field(max_length=100)
+    description: str = ""
+    award_type_code: str = Field(min_length=1, max_length=20)
+    award_type_description: str | None = None
+    source_url: str = Field(pattern=r"^https://www\.usaspending\.gov/award/")
+    source: SourceName = SourceName.USA_SPENDING_CONTRACT_TRANSACTIONS
+    ingested_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+    @field_validator("federal_action_obligation_usd")
+    @classmethod
+    def transaction_obligation_must_be_finite(cls, value: Decimal) -> Decimal:
+        if not value.is_finite():
+            raise ValueError("contract transaction obligation must be finite")
+        return value
+
+    @field_validator("ingested_at")
+    @classmethod
+    def transaction_timestamp_must_be_timezone_aware(cls, value: datetime) -> datetime:
+        if value.tzinfo is None:
+            raise ValueError("contract transaction timestamp must be timezone-aware")
+        return value
 
 
 class ExposureEvidence(BaseModel):
@@ -578,6 +648,114 @@ class CompanyExposureRegistry(BaseModel):
         reachable.add(entity_id)
         for child_id in adjacency[entity_id]:
             CompanyExposureRegistry._collect_reachable(child_id, adjacency, reachable)
+
+
+class JobLocation(BaseModel):
+    """One normalized location attached to a company career posting."""
+
+    model_config = ConfigDict(frozen=True)
+
+    location_id: str = Field(pattern=r"^[a-f0-9]{64}$")
+    raw_location: str = Field(min_length=1)
+    city: str | None = None
+    region: str | None = None
+    country: str | None = None
+    country_code: str | None = Field(default=None, pattern=r"^[A-Z]{2}$")
+    facility_entity_id: str | None = Field(
+        default=None,
+        pattern=r"^[a-z0-9][a-z0-9_-]{2,79}$",
+    )
+    is_remote: bool = False
+    match_confidence: float | None = Field(default=None, ge=0, le=1)
+
+
+class JobPosting(BaseModel):
+    """Normalized career posting with deterministic company and taxonomy attribution."""
+
+    model_config = ConfigDict(frozen=True)
+
+    source_id: str = Field(pattern=r"^[a-z0-9][a-z0-9_-]{2,79}$")
+    source_job_id: str = Field(min_length=1, max_length=300)
+    ticker: str = Field(pattern=r"^[A-Z][A-Z0-9.-]{0,9}$")
+    entity_id: str = Field(pattern=r"^[a-z0-9][a-z0-9_-]{2,79}$")
+    title: str = Field(min_length=1)
+    description: str = ""
+    department: str | None = None
+    team: str | None = None
+    employment_type: str | None = None
+    workplace_type: str | None = None
+    posted_at: datetime | None = None
+    source_url: str = Field(pattern=r"^https?://")
+    locations: tuple[JobLocation, ...] = Field(min_length=1)
+    business_line_id: str | None = None
+    business_line_name: str | None = None
+    job_function: str | None = None
+    seniority: str | None = None
+    themes: tuple[str, ...] = ()
+    classification_method: JobClassificationMethod = JobClassificationMethod.UNCLASSIFIED
+    classification_confidence: float = Field(default=0, ge=0, le=1)
+    classification_version: int = Field(default=1, ge=1)
+    source: SourceName = SourceName.COMPANY_CAREERS
+    ingested_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+    @field_validator("posted_at", "ingested_at")
+    @classmethod
+    def job_timestamps_must_be_timezone_aware(
+        cls,
+        value: datetime | None,
+    ) -> datetime | None:
+        if value is not None and value.tzinfo is None:
+            raise ValueError("job timestamps must be timezone-aware")
+        return value
+
+    @property
+    def natural_key(self) -> tuple[str, str]:
+        return self.source_id, self.source_job_id
+
+
+class LaborMarketObservation(BaseModel):
+    """One official labor-market metric at quarter/geography/industry grain."""
+
+    model_config = ConfigDict(frozen=True)
+
+    period_start: date
+    geography_level: str = Field(min_length=1)
+    geography_code: str = Field(min_length=1)
+    geography_name: str = Field(min_length=1)
+    industry_code: str = Field(pattern=r"^\d{2,6}$")
+    industry_name: str = Field(min_length=1)
+    metric: LaborMetricName
+    value: Decimal
+    unit: str = Field(min_length=1)
+    seasonally_adjusted: bool = False
+    source: SourceName = SourceName.CENSUS_QWI
+    source_url: str = Field(pattern=r"^https?://")
+    source_updated_at: datetime | None = None
+    ingested_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+    @field_validator("period_start")
+    @classmethod
+    def quarter_must_start_on_first_day(cls, value: date) -> date:
+        if value.day != 1 or value.month not in (1, 4, 7, 10):
+            raise ValueError("quarterly period_start must be the first day of a quarter")
+        return value
+
+    @field_validator("value")
+    @classmethod
+    def labor_value_must_be_finite(cls, value: Decimal) -> Decimal:
+        if not value.is_finite():
+            raise ValueError("labor-market value must be finite")
+        return value
+
+    @field_validator("source_updated_at", "ingested_at")
+    @classmethod
+    def labor_timestamps_must_be_timezone_aware(
+        cls,
+        value: datetime | None,
+    ) -> datetime | None:
+        if value is not None and value.tzinfo is None:
+            raise ValueError("labor-market timestamps must be timezone-aware")
+        return value
 
 
 class IngestionResult(BaseModel):

@@ -1,0 +1,32 @@
+[
+  [
+    "geography",
+    "industry",
+    "Emp",
+    "EmpEnd",
+    "HirA",
+    "Sep",
+    "FrmJbGn",
+    "FrmJbLs",
+    "EarnS",
+    "Payroll",
+    "state",
+    "year",
+    "quarter"
+  ],
+  [
+    "Illinois",
+    "Construction Machinery Manufacturing",
+    "12500",
+    "12620",
+    "910",
+    "790",
+    "360",
+    "240",
+    "6820",
+    "255750000",
+    "17",
+    "2025",
+    "1"
+  ]
+]

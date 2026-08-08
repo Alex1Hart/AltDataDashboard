@@ -1,0 +1,50 @@
+{
+  "page_metadata": {
+    "page": 1,
+    "next": null,
+    "previous": null,
+    "hasNext": false,
+    "hasPrevious": false
+  },
+  "results": [
+    {
+      "id": "transaction-1",
+      "action_date": "2026-01-15",
+      "action_type": "A",
+      "action_type_description": "NEW AWARD",
+      "modification_number": "0",
+      "description": "Initial funded obligation",
+      "federal_action_obligation": 100000000.0,
+      "face_value_loan_guarantee": null,
+      "original_loan_subsidy_cost": null,
+      "type": "A",
+      "type_description": "DEFINITIVE CONTRACT"
+    },
+    {
+      "id": "transaction-2",
+      "action_date": "2026-06-30",
+      "action_type": "C",
+      "action_type_description": "FUNDING ONLY ACTION",
+      "modification_number": "P00001",
+      "description": "Incremental production funding",
+      "federal_action_obligation": 30000000.0,
+      "face_value_loan_guarantee": null,
+      "original_loan_subsidy_cost": null,
+      "type": "A",
+      "type_description": "DEFINITIVE CONTRACT"
+    },
+    {
+      "id": "transaction-3",
+      "action_date": "2026-07-15",
+      "action_type": "D",
+      "action_type_description": "CHANGE ORDER",
+      "modification_number": "P00002",
+      "description": "Partial funding deobligation",
+      "federal_action_obligation": -5000000.0,
+      "face_value_loan_guarantee": null,
+      "original_loan_subsidy_cost": null,
+      "type": "A",
+      "type_description": "DEFINITIVE CONTRACT"
+    }
+  ]
+}

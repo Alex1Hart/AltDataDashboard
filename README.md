@@ -1,5 +1,8 @@
 # PortWatch
 
+[![CI](https://github.com/Alex1Hart/AltDataDashboard/actions/workflows/ci.yml/badge.svg)](https://github.com/Alex1Hart/AltDataDashboard/actions/workflows/ci.yml)
+[![HiringWatch Daily](https://github.com/Alex1Hart/AltDataDashboard/actions/workflows/hiringwatch-daily.yml/badge.svg)](https://github.com/Alex1Hart/AltDataDashboard/actions/workflows/hiringwatch-daily.yml)
+
 PortWatch is a company-centered alternative-data research system for Industrials equities.
 It combines company-specific public records with port, trade, and operating data to produce
 dated, evidence-backed company insight cards. Explicit provenance separates observed company
@@ -8,10 +11,12 @@ events from contextual cargo movements and inferred public-company exposure.
 > **Primary objective:** discover differentiated, micro/company-level changes that can update an
 > investment thesis. Port and trade aggregates are supporting evidence, not the final product.
 
-> **Project status:** v0.4 company-evidence foundation. The vintage-aware port/trade pipeline,
+> **Project status:** v0.5 company-evidence foundation. The vintage-aware port/trade pipeline,
 > dated entity graph, SEC submissions and Company Facts ingestion, ContractWatch federal-award
-> pipeline, and inferred exposure layer are implemented. Evidence-gated company insight cards are
-> the next product milestone.
+> and signed-action pipeline, HiringWatch career-posting lifecycle pipeline, Census QWI labor
+> benchmarks, and
+> inferred exposure layer are implemented. Evidence-gated company insight cards are the next
+> product milestone.
 
 ## Why this exists
 
@@ -46,6 +51,8 @@ source-specific validation, resumable configuration-driven backfills, raw respon
 revision history, and success/failure run audits.
 
 See [the company insight strategy](docs/company-insight-strategy.md),
+[ContractWatch research semantics](docs/contractwatch.md),
+[HiringWatch design and onboarding](docs/hiringwatch.md),
 [project structure](docs/project-structure.md), [data model](docs/data-model.md), and
 [architecture notes](docs/architecture.md) for component boundaries and research semantics.
 
@@ -112,7 +119,7 @@ The adapter archives each complete SEC response for reproducibility and normaliz
 recent five filing years by default to keep local research runs fast and memory-bounded. Adjust
 `PORTWATCH_SEC_FACT_HISTORY_YEARS` in `.env` when a longer analytical history is required.
 
-Ingest company-linked federal prime contract awards from the public
+Ingest company-linked federal prime contract awards and dated actions from the public
 [USAspending API](https://api.usaspending.gov/docs/intro-tutorial):
 
 ```bash
@@ -123,8 +130,44 @@ portwatch ingest contracts --ticker CAT --start 2024-10-01 --end 2026-08-07
 ContractWatch requires no API key. It searches each active legal entity in the reviewed company
 graph, then accepts an attribution only through a matching UEI, USAspending recipient ID, or exact
 normalized reviewed name. Fuzzy-search candidates that do not resolve are rejected and counted in
-the ingestion audit. `Award Amount` is current cumulative federal obligations—not revenue,
-remaining backlog, or a contract ceiling. The dashboard labels these semantics explicitly.
+the ingestion audit. For every matched award, it also collects the signed transaction history:
+positive actions add federal obligations and negative actions are deobligations. The dashboard
+separates these dated flows from `Award Amount`, which is the current cumulative obligation—not
+revenue, remaining backlog, or a contract ceiling.
+
+Ingest first-party company career postings and build posting history:
+
+```bash
+# Run Caterpillar only, or omit --ticker to run every enabled source.
+portwatch ingest hiring --ticker CAT
+portwatch ingest hiring
+# Optional operator override; source pacing still applies.
+portwatch ingest hiring --ticker CAT --detail-limit 250
+portwatch audit hiring
+```
+
+HiringWatch supports the documented
+[Greenhouse Job Board API](https://developers.greenhouse.io/job-board.html) and
+[Lever Postings API](https://github.com/lever/postings-api) plus configurable paginated
+HTML career sites. Company URLs, selectors, reported business lines, functions, strategic themes,
+and NAICS benchmarks live in `config/hiringwatch.yml`; onboarding a supported company does not
+require a new Python scraper. For HTML sources, bounded schema.org detail enrichment is cached and
+periodically refreshed, so full descriptions are not re-downloaded every day or left permanently
+stale. The initial snapshot is recorded as a baseline rather than a burst of openings. Run this
+command daily to make new-posting,
+closure, reopening, mix, and location signals useful. A posting is advertised demand, not evidence
+of a completed hire.
+
+Ingest an official Census Quarterly Workforce Indicators benchmark:
+
+```bash
+portwatch ingest qwi --year 2025 --quarter 1 --industry 333120 --geography-code 17
+```
+
+QWI requires `CENSUS_API_KEY`. The official
+[Census QWI API](https://www.census.gov/data/developers/data-sets/qwi.html) supplies
+industry/geography employment, hires, separations, job gains/losses, earnings, and payroll context
+for comparison with company-level posting behavior.
 
 Schedule D port codes used in the initial scope:
 
@@ -158,8 +201,12 @@ require credentials.
 - [x] Dated company/subsidiary/facility entity graph with reviewed identifiers
 - [ ] Source-specific automated entity matching with analyst approval
 - [x] Company-specific SEC filing and structured-fact adapter
-- [x] Company-level federal prime-award adapter for reviewed Industrials issuers
-- [x] Contract obligation momentum, agency concentration, and expiration-wall dashboard
+- [x] Company-level federal prime-award and signed-transaction adapter
+- [x] Contract funding/deobligation momentum, agency/NAICS/PSC mix, and expiration dashboard
+- [x] Config-driven Greenhouse, Lever, and paginated HTML career adapters
+- [x] Career-posting lifecycle events with two-snapshot closure confirmation
+- [x] Business-line, function, strategic-theme, location, and facility hiring drilldowns
+- [x] Census QWI macro labor benchmark ingestion and dashboard
 - [ ] Facility event adapters for OSHA and EPA public records
 - [ ] Evidence-gated company insight cards with confidence and counterevidence
 - [ ] Daily dwell, vessel, rail, and blank-sailing adapters

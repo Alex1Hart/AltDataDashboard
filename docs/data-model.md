@@ -142,35 +142,90 @@ Point-in-time research must use `accepted_at`/`publication_at` and retain that e
 The original decimal value is stored as text to avoid precision loss; dashboard queries may derive
 a floating-point value for display.
 
-## Federal prime contract awards
+## Federal prime contracts
 
-`federal_contract_awards` stores the latest USAspending snapshot at:
+ContractWatch deliberately keeps two economic grains separate. `federal_contract_awards` stores
+the latest USAspending award snapshot at:
 
 ```text
-generated_internal_id × source
+generated_internal_award_id × source
 ```
 
-Each award records its matched registry entity, ticker, recipient name and identifiers, match
-method, PIID, agencies, NAICS/PSC, place of performance, dates, current obligation amount,
-outlays, source URL, availability timestamp, and raw response hash. Attribution is deterministic:
-UEI first, then a reviewed USAspending recipient ID, then an exact punctuation-insensitive match to
-a reviewed entity name or alias active on the award's base obligation date. Unresolved fuzzy-search
-results remain in the raw archive and are counted as rejected; they do not enter the award table.
+Each award records its matched registry entity, ticker, recipient identifiers, match method, PIID,
+agencies, NAICS/PSC, place of performance, dates, current cumulative obligation amount, outlays,
+source URL, availability timestamp, and raw response hash. `federal_contract_award_revisions`
+retains every changed snapshot with `valid_from` and `valid_until` for point-in-time analysis.
 
-`federal_contract_award_revisions` retains every distinct snapshot and uses `valid_from` and
-`valid_until` for point-in-time analysis. A changed award and its new revision are written in one
-transaction.
+`federal_contract_transactions` stores the dated action history at:
 
-ContractWatch signals are intentionally narrow:
+```text
+USAspending transaction ID × source
+```
+
+Each action links to its parent award and reviewed company entity. It records action date, signed
+`federal_action_obligation_usd`, action type, modification number, description, publication and
+availability timestamps, and raw response hash. Positive obligations add funding; negative values
+are deobligations. `federal_contract_transaction_revisions` preserves corrections to a stable
+transaction ID. Award and transaction changes are written in one database transaction, preventing
+a partially refreshed company view.
+
+Attribution is deterministic: UEI first, then a reviewed USAspending recipient ID, then an exact
+punctuation-insensitive match to a reviewed entity name or alias active on the award's base
+obligation date. Unresolved fuzzy-search results remain in the raw archive and are counted as
+rejected; they do not enter either normalized table.
+
+Primary ContractWatch signals are:
 
 | Signal | Meaning |
 |---|---|
+| `ttm_net_obligations_usd` | Signed obligation actions in the trailing twelve months |
+| `ttm_net_obligations_yoy` | TTM net actions versus the preceding twelve months |
+| `ttm_gross_obligations_usd` | Positive TTM obligation actions before deobligations |
+| `ttm_deobligations_usd` | Absolute value of negative TTM obligation actions |
+| `ttm_modification_count` | TTM actions carrying a nonzero modification number |
+| `transaction_coverage` | Share of matched current awards with ingested action history |
 | `total_current_obligations_usd` | Sum of current cumulative award obligations |
-| `ttm_new_award_obligations_usd` | Current award value for awards whose base obligation date falls in the trailing year |
-| `ttm_new_award_yoy` | TTM new-award value versus the preceding twelve months |
-| `agency_hhi` | Concentration of positive current obligations by awarding agency |
-| `next_12m_expiring_award_value_usd` | Current value of awards whose performance period ends in the next year |
+| `agency_hhi` | Concentration of positive current award obligations by awarding agency |
+| `next_12m_expiring_award_value_usd` | Current obligations on awards ending in the next year |
 
-None of these fields is company revenue, funded backlog, a contract ceiling, or remaining value.
-The award-level adapter does not allocate later modifications back to their action dates; a future
-transaction adapter is required for true obligation-flow analysis.
+Current award inventory and transaction flow are not interchangeable. Neither is company revenue,
+funded backlog, a contract ceiling, remaining contract value, or evidence of margin. See
+[ContractWatch research semantics](contractwatch.md) for pitch use and limitations.
+
+## Company hiring demand
+
+`job_postings` stores the current state at:
+
+```text
+career source x source job ID
+```
+
+Each row links a first-party posting to the reviewed issuer/entity, raw payload, observed and
+source dates, business line, function, seniority, strategic themes, and classification version.
+`job_posting_locations` is a many-to-many child table so a multi-location posting remains one job
+while contributing to each advertised geography. A deterministic locality match may link a
+location to a reviewed facility node; unmatched locations remain explicit rather than guessed.
+
+`job_posting_revisions` retains every meaningful content or status vintage. `job_events` records
+the source's initial `baseline`, followed by `opened`, `updated`, `closed`, and `reopened` events.
+Baseline rows do not count as new-posting signals. A job is not closed after one absence: its
+`missing_snapshot_count` must reach the configured threshold, and the counter advances only after
+a complete source snapshot. This protects the lifecycle from pagination and transient-site errors.
+
+Primary HiringWatch signals are active postings, 28-day openings/reopenings and closures, net
+posting change, median active age, business-line/function mix, strategic-theme mix, facility and
+location concentration, remote share, and classification coverage. These measure advertised labor
+demand. They do not measure filled roles, employee headcount, hiring spend, or management guidance.
+
+## Industry labor benchmarks
+
+`labor_market_observations` stores the latest official Census QWI observation at:
+
+```text
+quarter x geography x NAICS industry x metric x source
+```
+
+Metrics include beginning/ending employment, hires, separations, firm job gains/losses, stable-job
+earnings, and payroll. `labor_market_observation_revisions` preserves corrections. QWI is a lagged
+macro benchmark; it contextualizes company posting changes but cannot be synchronized as if both
+series represented the same event or publication date.

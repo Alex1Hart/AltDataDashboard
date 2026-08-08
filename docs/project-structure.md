@@ -5,31 +5,49 @@ and deterministic research analytics. The dashboard does not call upstream sourc
 
 ```text
 FinanceTools/
+├── .github/workflows/
+│   ├── ci.yml                        # Lint, formatting, typing, tests, coverage
+│   └── hiringwatch-daily.yml         # Persistent scheduled career ingestion
 ├── config/
 │   ├── portwatch.yml                 # Backfill universe and execution policy
+│   ├── hiringwatch.yml                # Career sources and hiring taxonomies
 │   └── company_exposures.yml         # Dated entity graph, exposures, and evidence
 ├── docs/
 │   ├── architecture.md               # Component boundaries and design decisions
 │   ├── company-insight-strategy.md   # Company evidence contract and source priorities
 │   ├── data-model.md                 # Grains, vintages, and signal definitions
 │   └── project-structure.md           # This file
+├── scripts/
+│   └── restore_hiringwatch_state.sh  # Fail-closed workflow state restoration
 ├── src/portwatch/
 │   ├── analytics/
-│   │   ├── contracts.py              # Award momentum, agency HHI, expiration wall
+│   │   ├── contracts.py              # Signed funding flows, mix, award inventory
+│   │   ├── hiring.py                 # Posting lifecycle, mix, location, labor signals
 │   │   └── signals.py                # YoY, momentum, z-score, HHI, unit value
 │   ├── dashboard/
-│   │   └── app.py                    # Read-only Streamlit research interface
+│   │   ├── pages/                    # Company, hiring, contracts, market, audit tabs
+│   │   ├── app.py                    # Thin Streamlit composition root
+│   │   ├── components.py             # Shared visual components
+│   │   ├── data.py                   # Named, testable dashboard query bundle
+│   │   └── formatters.py             # Presentation-only value formatting
 │   ├── ingestion/
 │   │   ├── census.py                 # Census port/HS API adapter
+│   │   ├── careers.py                # Greenhouse, Lever, and HTML career adapters
 │   │   ├── port_of_la.py             # Port of LA public HTML adapter
 │   │   ├── sec.py                    # SEC submissions and Company Facts adapter
-│   │   └── usaspending.py            # Federal prime-award search and entity resolution
+│   │   ├── qwi.py                    # Census Quarterly Workforce Indicators adapter
+│   │   └── usaspending.py            # Prime-award search, resolution, transaction history
 │   ├── storage/
 │   │   └── duckdb.py                 # Current tables, vintages, audit history
 │   ├── backfill.py                   # Resumable Cartesian backfill orchestration
 │   ├── cli.py                        # Operator commands
 │   ├── config.py                     # Environment/secrets configuration
 │   ├── contract_service.py            # Atomic ContractWatch orchestration
+│   ├── hiring_config.py              # Versioned source and taxonomy configuration
+│   ├── hiring_classifier.py          # Explainable business/facility classification
+│   ├── hiring_service.py             # Complete-snapshot lifecycle orchestration
+│   ├── health.py                     # Persisted-state invariant audits
+│   ├── labor_service.py              # Atomic labor-benchmark orchestration
 │   ├── models.py                     # Validated domain and exposure models
 │   ├── port_service.py               # Port-operation ingestion transaction
 │   ├── project_config.py             # Versioned YAML project configuration
@@ -84,8 +102,13 @@ portwatch ingest port-la
 # Ingest company-specific SEC evidence through the reviewed CIK mapping
 portwatch ingest sec --ticker CAT
 
-# Ingest company-linked federal prime awards; dates default to trailing three years
+# Ingest company-linked prime awards and their signed action histories
 portwatch ingest contracts --ticker CAT --start 2024-10-01 --end 2026-08-07
+portwatch audit contracts
+
+# Ingest company career demand and an industry labor benchmark
+portwatch ingest hiring --ticker CAT
+portwatch ingest qwi --year 2025 --quarter 1 --industry 333120 --geography-code 17
 
 # Launch research dashboard
 portwatch dashboard

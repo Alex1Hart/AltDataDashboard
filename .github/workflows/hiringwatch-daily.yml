@@ -1,0 +1,90 @@
+name: HiringWatch Daily
+
+on:
+  schedule:
+    - cron: "17 12 * * *"
+  workflow_dispatch:
+    inputs:
+      ticker:
+        description: "Optional ticker filter; blank runs every enabled source"
+        required: false
+        type: string
+      detail_limit:
+        description: "Maximum detail pages per source"
+        required: false
+        default: "50"
+        type: string
+      reset_state:
+        description: "Start a new baseline instead of restoring the last successful state"
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: hiringwatch-daily
+  cancel-in-progress: false
+
+permissions:
+  actions: read
+  contents: read
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PYTHONUNBUFFERED: "1"
+  PORTWATCH_DATABASE_PATH: data/portwatch.duckdb
+  PORTWATCH_CAREERS_REQUEST_INTERVAL_SECONDS: "0.75"
+  PORTWATCH_USER_AGENT: PortWatch/0.1 (scheduled research ingestion)
+
+jobs:
+  ingest:
+    name: Ingest complete career snapshots
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install package
+        run: python -m pip install -e .
+      - name: Restore last successful HiringWatch state
+        if: ${{ github.event_name != 'workflow_dispatch' || !inputs.reset_state }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          bash scripts/restore_hiringwatch_state.sh
+          "$PORTWATCH_DATABASE_PATH"
+          "hiringwatch-daily.yml"
+          "${{ github.ref_name }}"
+      - name: Initialize database
+        run: portwatch init-db
+      - name: Ingest HiringWatch
+        env:
+          TICKER: ${{ inputs.ticker }}
+          DETAIL_LIMIT: ${{ inputs.detail_limit }}
+        run: |
+          args=(ingest hiring)
+          if [[ -n "$TICKER" ]]; then
+            args+=(--ticker "$TICKER")
+          fi
+          if [[ -n "$DETAIL_LIMIT" ]]; then
+            args+=(--detail-limit "$DETAIL_LIMIT")
+          fi
+          portwatch "${args[@]}"
+      - name: Audit persisted state
+        run: portwatch audit hiring
+      - name: Publish run summary
+        run: |
+          echo "### HiringWatch daily ingestion" >> "$GITHUB_STEP_SUMMARY"
+          echo '```json' >> "$GITHUB_STEP_SUMMARY"
+          portwatch audit hiring >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+      - name: Save state for the next run
+        uses: actions/upload-artifact@v4
+        with:
+          name: hiringwatch-state
+          path: data/portwatch.duckdb
+          if-no-files-found: error
+          compression-level: 6
+          retention-days: 30

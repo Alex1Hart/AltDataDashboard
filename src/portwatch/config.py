@@ -29,6 +29,10 @@ class Settings(BaseSettings):
         default=Path("config/company_exposures.yml"),
         alias="PORTWATCH_COMPANY_REGISTRY_PATH",
     )
+    hiring_config_path: Path = Field(
+        default=Path("config/hiringwatch.yml"),
+        alias="PORTWATCH_HIRING_CONFIG_PATH",
+    )
     http_timeout_seconds: float = Field(
         default=30.0,
         gt=0,
@@ -65,6 +69,29 @@ class Settings(BaseSettings):
         ge=1,
         le=1_000,
         alias="PORTWATCH_USASPENDING_MAX_PAGES_PER_SEARCH",
+    )
+    usaspending_transaction_page_size: int = Field(
+        default=5_000,
+        ge=1,
+        le=5_000,
+        alias="PORTWATCH_USASPENDING_TRANSACTION_PAGE_SIZE",
+    )
+    usaspending_max_transaction_pages_per_award: int = Field(
+        default=10,
+        ge=1,
+        le=1_000,
+        alias="PORTWATCH_USASPENDING_MAX_TRANSACTION_PAGES_PER_AWARD",
+    )
+    careers_request_interval_seconds: float = Field(
+        default=0.5,
+        ge=0,
+        alias="PORTWATCH_CAREERS_REQUEST_INTERVAL_SECONDS",
+    )
+    careers_max_pages: int = Field(
+        default=100,
+        ge=1,
+        le=1_000,
+        alias="PORTWATCH_CAREERS_MAX_PAGES",
     )
     log_level: str = Field(default="INFO", alias="PORTWATCH_LOG_LEVEL")
 

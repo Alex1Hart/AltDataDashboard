@@ -19,11 +19,13 @@ from portwatch.models import (
     ContractMatchMethod,
     EntityIdentifierScheme,
     FederalContractAward,
+    FederalContractTransaction,
     RegistryEntityType,
 )
 from portwatch.registry import company_entity_ids, resolve_entity_id
 
 AWARD_SEARCH_URL = "https://api.usaspending.gov/api/v2/search/spending_by_award/"
+TRANSACTION_SEARCH_URL = "https://api.usaspending.gov/api/v2/transactions/"
 CONTRACT_AWARD_TYPE_CODES = ("A", "B", "C", "D")
 AWARD_FIELDS = (
     "Award ID",
@@ -78,6 +80,18 @@ class USAspendingAwardPage:
 
 
 @dataclass(frozen=True)
+class USAspendingTransactionPage:
+    award_key: str
+    page_number: int
+    request_payload: bytes
+    response_payload: bytes
+    source_url: str
+    transactions: tuple[FederalContractTransaction, ...]
+    records_received: int
+    has_next: bool
+
+
+@dataclass(frozen=True)
 class USAspendingAwardBatch:
     ticker: str
     root_entity_id: str
@@ -85,8 +99,11 @@ class USAspendingAwardBatch:
     end_date: date
     pages: tuple[USAspendingAwardPage, ...]
     awards: tuple[FederalContractAward, ...]
+    transaction_pages: tuple[USAspendingTransactionPage, ...]
+    transactions: tuple[FederalContractTransaction, ...]
     records_received: int
     records_unmatched: int
+    transaction_records_received: int
 
 
 class USAspendingClient:
@@ -161,7 +178,7 @@ class USAspendingClient:
                     sort_keys=True,
                     separators=(",", ":"),
                 ).encode("utf-8")
-                response, response_payload = self._post_json(request)
+                response, response_payload = self._post_json(AWARD_SEARCH_URL, request)
                 page_awards, page_received, page_unmatched, has_next = parse_award_page(
                     response,
                     registry=self.registry,
@@ -199,6 +216,10 @@ class USAspendingClient:
                     )
                 page_number += 1
 
+        transaction_pages, transactions = self._fetch_transaction_history(
+            tuple(awards_by_key.values()),
+            ingested_at=ingested_at,
+        )
         return USAspendingAwardBatch(
             ticker=normalized_ticker,
             root_entity_id=root_entity_id,
@@ -206,9 +227,77 @@ class USAspendingClient:
             end_date=end_date,
             pages=tuple(pages),
             awards=tuple(awards_by_key.values()),
+            transaction_pages=transaction_pages,
+            transactions=transactions,
             records_received=records_received,
             records_unmatched=records_unmatched,
+            transaction_records_received=sum(page.records_received for page in transaction_pages),
         )
+
+    def _fetch_transaction_history(
+        self,
+        awards: tuple[FederalContractAward, ...],
+        *,
+        ingested_at: datetime,
+    ) -> tuple[
+        tuple[USAspendingTransactionPage, ...],
+        tuple[FederalContractTransaction, ...],
+    ]:
+        pages: list[USAspendingTransactionPage] = []
+        transactions_by_id: dict[str, FederalContractTransaction] = {}
+        for award_position, award in enumerate(awards, start=1):
+            page_number = 1
+            while True:
+                self.progress_fn(
+                    f"USAspending transaction history {award_position}/{len(awards)}, "
+                    f"page {page_number}: {award.award_id}"
+                )
+                request = _transaction_search_request(
+                    award_key=award.award_key,
+                    page=page_number,
+                    limit=self.settings.usaspending_transaction_page_size,
+                )
+                request_payload = json.dumps(
+                    request,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+                response, response_payload = self._post_json(TRANSACTION_SEARCH_URL, request)
+                page_transactions, received, has_next = parse_transaction_page(
+                    response,
+                    award=award,
+                    ingested_at=ingested_at,
+                )
+                pages.append(
+                    USAspendingTransactionPage(
+                        award_key=award.award_key,
+                        page_number=page_number,
+                        request_payload=request_payload,
+                        response_payload=response_payload,
+                        source_url=TRANSACTION_SEARCH_URL,
+                        transactions=tuple(page_transactions),
+                        records_received=received,
+                        has_next=has_next,
+                    )
+                )
+                for transaction in page_transactions:
+                    existing = transactions_by_id.get(transaction.transaction_id)
+                    if existing is not None and existing != transaction:
+                        raise USAspendingResponseError(
+                            "conflicting transaction snapshots returned for "
+                            f"{transaction.transaction_id}"
+                        )
+                    transactions_by_id[transaction.transaction_id] = transaction
+                if not has_next:
+                    break
+                if page_number >= self.settings.usaspending_max_transaction_pages_per_award:
+                    raise USAspendingResponseError(
+                        "USAspending transaction pagination limit reached for award "
+                        f"{award.award_id}; increase "
+                        "PORTWATCH_USASPENDING_MAX_TRANSACTION_PAGES_PER_AWARD"
+                    )
+                page_number += 1
+        return tuple(pages), tuple(transactions_by_id.values())
 
     @retry(
         retry=retry_if_exception_type(
@@ -218,9 +307,13 @@ class USAspendingClient:
         stop=stop_after_attempt(4),
         reraise=True,
     )
-    def _post_json(self, request: Mapping[str, Any]) -> tuple[Mapping[str, Any], bytes]:
+    def _post_json(
+        self,
+        url: str,
+        request: Mapping[str, Any],
+    ) -> tuple[Mapping[str, Any], bytes]:
         self._rate_limit()
-        response = self._client.post(AWARD_SEARCH_URL, json=request)
+        response = self._client.post(url, json=request)
         if response.status_code in _TRANSIENT_STATUS_CODES:
             raise USAspendingTransientResponseError(
                 f"USAspending returned transient HTTP {response.status_code}"
@@ -372,6 +465,57 @@ def parse_award_page(
     return awards, len(results), unmatched, has_next
 
 
+def parse_transaction_page(
+    payload: Mapping[str, Any],
+    *,
+    award: FederalContractAward,
+    ingested_at: datetime,
+) -> tuple[list[FederalContractTransaction], int, bool]:
+    """Normalize one complete parent-award transaction-history page."""
+    results = payload.get("results")
+    if not isinstance(results, list):
+        raise USAspendingResponseError("USAspending transaction response is missing results")
+    page_metadata = payload.get("page_metadata")
+    if not isinstance(page_metadata, Mapping):
+        raise USAspendingResponseError("USAspending transaction response is missing page_metadata")
+    has_next = page_metadata.get("hasNext")
+    if not isinstance(has_next, bool):
+        raise USAspendingResponseError(
+            "USAspending transaction page_metadata.hasNext is not a boolean"
+        )
+
+    transactions: list[FederalContractTransaction] = []
+    for result in results:
+        if not isinstance(result, Mapping):
+            raise USAspendingResponseError("USAspending transaction result is not an object")
+        transactions.append(
+            FederalContractTransaction(
+                transaction_id=_required_text(result, "id"),
+                award_key=award.award_key,
+                entity_id=award.entity_id,
+                ticker=award.ticker,
+                award_id=award.award_id,
+                action_date=_required_date(result, "action_date"),
+                federal_action_obligation_usd=_required_decimal(
+                    result,
+                    "federal_action_obligation",
+                ),
+                action_type=_optional_text(result, "action_type"),
+                action_type_description=_optional_text(
+                    result,
+                    "action_type_description",
+                ),
+                modification_number=_optional_text(result, "modification_number") or "",
+                description=_optional_text(result, "description") or "",
+                award_type_code=_required_text(result, "type"),
+                award_type_description=_optional_text(result, "type_description"),
+                source_url=award.source_url,
+                ingested_at=ingested_at,
+            )
+        )
+    return transactions, len(results), has_next
+
+
 def _resolve_recipient(
     result: Mapping[str, Any],
     *,
@@ -445,6 +589,21 @@ def _award_search_request(
             ],
         },
         "fields": list(AWARD_FIELDS),
+    }
+
+
+def _transaction_search_request(
+    *,
+    award_key: str,
+    page: int,
+    limit: int,
+) -> dict[str, Any]:
+    return {
+        "award_id": award_key,
+        "page": page,
+        "limit": limit,
+        "sort": "action_date",
+        "order": "desc",
     }
 
 

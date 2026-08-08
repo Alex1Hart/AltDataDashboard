@@ -1,0 +1,13 @@
+{
+  "jobs": [
+    {
+      "id": 101,
+      "title": "Senior Manufacturing Engineer",
+      "absolute_url": "https://boards.greenhouse.io/acme/jobs/101",
+      "updated_at": "2026-08-06T14:30:00Z",
+      "location": {"name": "East Peoria, IL, United States"},
+      "departments": [{"id": 5, "name": "Operations"}],
+      "content": "<p>Build battery-enabled equipment for Building Construction Products.</p>"
+    }
+  ]
+}
